@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #edf1f5;
+  --panel: rgba(255, 255, 255, 0.9);
+  --text: #0e1a2f;
+  --muted: #5c687a;
+  --accent: #155e75;
+  --success: #2f9e44;
+  --danger: #c2252c;
+  --warning: #d97706;
+  --panel-border: rgba(14, 26, 47, 0.09);
+  --panel-shadow: 0 14px 36px rgba(18, 28, 45, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 12% 12%, rgba(21, 94, 117, 0.2), transparent 42%),
+    radial-gradient(circle at 85% 20%, rgba(217, 119, 6, 0.16), transparent 45%),
+    linear-gradient(180deg, #f7fafc 0%, #e7edf4 100%);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+  letter-spacing: -0.015em;
+}
+
+.panel {
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: var(--panel);
+  backdrop-filter: blur(5px);
+  box-shadow: var(--panel-shadow);
+}
+
+.badge {
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.text-muted {
+  color: var(--muted);
+}
+
+button,
+select,
+input {
+  font: inherit;
+}

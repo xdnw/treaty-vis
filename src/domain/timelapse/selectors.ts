@@ -1,0 +1,589 @@
+import type { TimelapseEvent } from "@/domain/timelapse/schema";
+import type { QueryState } from "@/features/filters/filterStore";
+
+const TERMINAL_ACTIONS = new Set(["cancelled", "expired", "ended", "inferred_cancelled"]);
+
+export type TimelapseIndices = {
+  allEventIndexes: number[];
+  byAction: Record<string, number[]>;
+  byType: Record<string, number[]>;
+  bySource: Record<string, number[]>;
+  byAlliance: Record<string, number[]>;
+  eventIdToIndex: Record<string, number>;
+  allActions: string[];
+  allTypes: string[];
+  allSources: string[];
+  alliances: Array<{ id: number; name: string; count: number }>;
+  minTimestamp: string | null;
+  maxTimestamp: string | null;
+};
+
+export type TimelapseDerivedData = {
+  datasetKey: string;
+  events: TimelapseEvent[];
+  indices: TimelapseIndices;
+};
+
+export type SelectionResult = {
+  indexes: number[];
+  events: TimelapseEvent[];
+};
+
+export type NetworkEdge = {
+  key: string;
+  eventId: string;
+  sourceId: string;
+  targetId: string;
+  sourceLabel: string;
+  targetLabel: string;
+  treatyType: string;
+  sourceType: string;
+  confidence: string;
+};
+
+export type PulsePoint = {
+  day: string;
+  signed: number;
+  terminal: number;
+  inferred: number;
+};
+
+type SelectorCacheEntry = {
+  key: string;
+  indexes: number[];
+};
+
+const selectorCache = new Map<string, SelectorCacheEntry>();
+const networkOrderCache = new WeakMap<number[], number[]>();
+
+function stableHashKey(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return hash >>> 0;
+}
+
+function keyForEvent(event: TimelapseEvent): string {
+  return `${event.pair_min_id}:${event.pair_max_id}:${event.treaty_type}`;
+}
+
+function selectStableCappedActiveEvents(activeEvents: TimelapseEvent[], keepCount: number): TimelapseEvent[] {
+  if (activeEvents.length <= keepCount) {
+    return activeEvents;
+  }
+
+  const hashByIndex = new Uint32Array(activeEvents.length);
+  const eventIdByIndex = new Array<string>(activeEvents.length);
+  for (let index = 0; index < activeEvents.length; index += 1) {
+    hashByIndex[index] = stableHashKey(keyForEvent(activeEvents[index]));
+    eventIdByIndex[index] = activeEvents[index].event_id;
+  }
+
+  const isWorse = (leftIndex: number, rightIndex: number): boolean => {
+    const leftHash = hashByIndex[leftIndex];
+    const rightHash = hashByIndex[rightIndex];
+    if (leftHash !== rightHash) {
+      return leftHash > rightHash;
+    }
+    return eventIdByIndex[leftIndex] > eventIdByIndex[rightIndex];
+  };
+
+  const heap: number[] = [];
+  const siftUp = (startIndex: number) => {
+    let child = startIndex;
+    while (child > 0) {
+      const parent = Math.floor((child - 1) / 2);
+      if (!isWorse(heap[child], heap[parent])) {
+        break;
+      }
+      const next = heap[parent];
+      heap[parent] = heap[child];
+      heap[child] = next;
+      child = parent;
+    }
+  };
+
+  const siftDown = (startIndex: number) => {
+    let parent = startIndex;
+    while (true) {
+      const left = parent * 2 + 1;
+      const right = left + 1;
+      let largest = parent;
+
+      if (left < heap.length && isWorse(heap[left], heap[largest])) {
+        largest = left;
+      }
+      if (right < heap.length && isWorse(heap[right], heap[largest])) {
+        largest = right;
+      }
+      if (largest === parent) {
+        break;
+      }
+
+      const next = heap[parent];
+      heap[parent] = heap[largest];
+      heap[largest] = next;
+      parent = largest;
+    }
+  };
+
+  for (let index = 0; index < activeEvents.length; index += 1) {
+    if (heap.length < keepCount) {
+      heap.push(index);
+      siftUp(heap.length - 1);
+      continue;
+    }
+
+    const worstSelected = heap[0];
+    if (isWorse(index, worstSelected)) {
+      continue;
+    }
+
+    heap[0] = index;
+    siftDown(0);
+  }
+
+  const selectedLookup = new Set(heap);
+  const reduced: TimelapseEvent[] = [];
+  for (let index = 0; index < activeEvents.length && reduced.length < keepCount; index += 1) {
+    if (selectedLookup.has(index)) {
+      reduced.push(activeEvents[index]);
+    }
+  }
+  return reduced;
+}
+
+function addToRecordList(record: Record<string, number[]>, key: string, index: number): void {
+  if (!record[key]) {
+    record[key] = [];
+  }
+  record[key].push(index);
+}
+
+export function buildTimelapseIndices(events: TimelapseEvent[]): TimelapseIndices {
+  const byAction: Record<string, number[]> = {};
+  const byType: Record<string, number[]> = {};
+  const bySource: Record<string, number[]> = {};
+  const byAlliance: Record<string, number[]> = {};
+  const eventIdToIndex: Record<string, number> = {};
+  const allianceMeta = new Map<number, { name: string; count: number }>();
+
+  const allEventIndexes: number[] = new Array(events.length);
+  for (let index = 0; index < events.length; index += 1) {
+    allEventIndexes[index] = index;
+    const event = events[index];
+    const source = event.source || "unknown";
+    addToRecordList(byAction, event.action, index);
+    addToRecordList(byType, event.treaty_type, index);
+    addToRecordList(bySource, source, index);
+    addToRecordList(byAlliance, String(event.from_alliance_id), index);
+    if (event.to_alliance_id !== event.from_alliance_id) {
+      addToRecordList(byAlliance, String(event.to_alliance_id), index);
+    }
+    eventIdToIndex[event.event_id] = index;
+
+    const fromMeta = allianceMeta.get(event.from_alliance_id) ?? {
+      name: event.from_alliance_name || String(event.from_alliance_id),
+      count: 0
+    };
+    fromMeta.name = fromMeta.name || event.from_alliance_name || String(event.from_alliance_id);
+    fromMeta.count += 1;
+    allianceMeta.set(event.from_alliance_id, fromMeta);
+
+    const toMeta = allianceMeta.get(event.to_alliance_id) ?? {
+      name: event.to_alliance_name || String(event.to_alliance_id),
+      count: 0
+    };
+    toMeta.name = toMeta.name || event.to_alliance_name || String(event.to_alliance_id);
+    toMeta.count += 1;
+    allianceMeta.set(event.to_alliance_id, toMeta);
+  }
+
+  return {
+    allEventIndexes,
+    byAction,
+    byType,
+    bySource,
+    byAlliance,
+    eventIdToIndex,
+    allActions: Object.keys(byAction).sort((a, b) => a.localeCompare(b)),
+    allTypes: Object.keys(byType).sort((a, b) => a.localeCompare(b)),
+    allSources: Object.keys(bySource).sort((a, b) => a.localeCompare(b)),
+    alliances: [...allianceMeta.entries()]
+      .map(([id, meta]) => ({ id, name: meta.name || String(id), count: meta.count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    minTimestamp: events.length > 0 ? events[0].timestamp : null,
+    maxTimestamp: events.length > 0 ? events[events.length - 1].timestamp : null
+  };
+}
+
+function intersectSorted(left: number[], right: number[]): number[] {
+  let l = 0;
+  let r = 0;
+  const next: number[] = [];
+  while (l < left.length && r < right.length) {
+    if (left[l] === right[r]) {
+      next.push(left[l]);
+      l += 1;
+      r += 1;
+      continue;
+    }
+    if (left[l] < right[r]) {
+      l += 1;
+    } else {
+      r += 1;
+    }
+  }
+  return next;
+}
+
+function unionSorted(slices: number[][]): number[] {
+  const set = new Set<number>();
+  for (const slice of slices) {
+    for (const value of slice) {
+      set.add(value);
+    }
+  }
+  return [...set].sort((a, b) => a - b);
+}
+
+function findStartIndex(events: TimelapseEvent[], timestamp: string): number {
+  let lo = 0;
+  let hi = events.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (events[mid].timestamp < timestamp) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
+function findEndIndex(events: TimelapseEvent[], timestamp: string): number {
+  let lo = 0;
+  let hi = events.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (events[mid].timestamp <= timestamp) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo - 1;
+}
+
+function compareEventChronology(left: TimelapseEvent, right: TimelapseEvent): number {
+  const timestampOrder = left.timestamp.localeCompare(right.timestamp);
+  if (timestampOrder !== 0) {
+    return timestampOrder;
+  }
+  return left.event_id.localeCompare(right.event_id);
+}
+
+function applySort(indexes: number[], events: TimelapseEvent[], query: QueryState): number[] {
+  const direction = query.sort.direction === "asc" ? 1 : -1;
+  const sorted = [...indexes];
+  sorted.sort((leftIndex, rightIndex) => {
+    const left = events[leftIndex];
+    const right = events[rightIndex];
+    let value = 0;
+
+    if (query.sort.field === "timestamp") {
+      value = left.timestamp.localeCompare(right.timestamp);
+    } else if (query.sort.field === "action") {
+      value = left.action.localeCompare(right.action);
+    } else if (query.sort.field === "type") {
+      value = left.treaty_type.localeCompare(right.treaty_type);
+    } else if (query.sort.field === "from") {
+      value = (left.from_alliance_name || String(left.from_alliance_id)).localeCompare(
+        right.from_alliance_name || String(right.from_alliance_id)
+      );
+    } else if (query.sort.field === "to") {
+      value = (left.to_alliance_name || String(left.to_alliance_id)).localeCompare(
+        right.to_alliance_name || String(right.to_alliance_id)
+      );
+    } else {
+      value = (left.source || "unknown").localeCompare(right.source || "unknown");
+    }
+
+    if (value !== 0) {
+      return value * direction;
+    }
+    return left.event_id.localeCompare(right.event_id) * direction;
+  });
+  return sorted;
+}
+
+function matchesTextQuery(event: TimelapseEvent, query: string): boolean {
+  if (!query) {
+    return true;
+  }
+  const normalized = query.toLowerCase();
+  const haystack = [
+    event.event_id,
+    event.action,
+    event.treaty_type,
+    event.source || "unknown",
+    event.from_alliance_name || "",
+    event.to_alliance_name || "",
+    String(event.from_alliance_id),
+    String(event.to_alliance_id)
+  ]
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(normalized);
+}
+
+function filterByDimension(values: string[], map: Record<string, number[]>): number[] | null {
+  if (values.length === 0) {
+    return null;
+  }
+  const slices = values.map((value) => map[value] ?? []);
+  return unionSorted(slices);
+}
+
+function filterByAlliances(values: number[], map: Record<string, number[]>): number[] | null {
+  if (values.length === 0) {
+    return null;
+  }
+  return unionSorted(values.map((id) => map[String(id)] ?? []));
+}
+
+function selectionCacheKey(datasetKey: string, query: QueryState): string {
+  // Keep cache keys compact and deterministic for large 100k+ filter churn.
+  return [
+    datasetKey,
+    query.time.start ?? "",
+    query.time.end ?? "",
+    query.playback.playhead ?? "",
+    String(query.focus.allianceId ?? ""),
+    query.focus.edgeKey ?? "",
+    query.focus.eventId ?? "",
+    query.filters.actions.join(","),
+    query.filters.treatyTypes.join(","),
+    query.filters.sources.join(","),
+    query.filters.alliances.join(","),
+    query.filters.includeInferred ? "1" : "0",
+    query.filters.includeNoise ? "1" : "0",
+    query.filters.evidenceMode,
+    query.textQuery.trim().toLowerCase(),
+    query.sort.field,
+    query.sort.direction
+  ].join("|");
+}
+
+export function selectEvents(derived: TimelapseDerivedData, query: QueryState): SelectionResult {
+  const canUseCache = derived.datasetKey !== "__loading__";
+  const cacheKey = selectionCacheKey(derived.datasetKey, query);
+  if (canUseCache) {
+    const cacheHit = selectorCache.get(cacheKey);
+    if (cacheHit) {
+      const cachedIndexes = cacheHit.indexes;
+      return {
+        indexes: cachedIndexes,
+        events: cachedIndexes.map((index) => derived.events[index])
+      };
+    }
+  }
+
+  const { events, indices } = derived;
+  const candidates: number[][] = [indices.allEventIndexes];
+
+  const actionSlice = filterByDimension(query.filters.actions, indices.byAction);
+  if (actionSlice) {
+    candidates.push(actionSlice);
+  }
+
+  const typeSlice = filterByDimension(query.filters.treatyTypes, indices.byType);
+  if (typeSlice) {
+    candidates.push(typeSlice);
+  }
+
+  const sourceSlice = filterByDimension(query.filters.sources, indices.bySource);
+  if (sourceSlice) {
+    candidates.push(sourceSlice);
+  }
+
+  const allianceSlice = filterByAlliances(query.filters.alliances, indices.byAlliance);
+  if (allianceSlice) {
+    candidates.push(allianceSlice);
+  }
+
+  candidates.sort((left, right) => left.length - right.length);
+  let selected = candidates[0] ?? [];
+  for (let index = 1; index < candidates.length; index += 1) {
+    selected = intersectSorted(selected, candidates[index]);
+  }
+
+  let start = 0;
+  let end = events.length - 1;
+  if (query.time.start) {
+    start = findStartIndex(events, query.time.start);
+  }
+  if (query.time.end) {
+    end = findEndIndex(events, query.time.end);
+  }
+
+  if (query.playback.playhead) {
+    end = Math.min(end, findEndIndex(events, query.playback.playhead));
+  }
+
+  const filtered = selected.filter((eventIndex) => {
+    if (eventIndex < start || eventIndex > end) {
+      return false;
+    }
+
+    const event = events[eventIndex];
+    if (!query.filters.includeInferred && event.inferred) {
+      return false;
+    }
+    if (!query.filters.includeNoise && event.noise_filtered) {
+      return false;
+    }
+    if (query.filters.evidenceMode === "one-confirmed" && !(event.grounded_from || event.grounded_to)) {
+      return false;
+    }
+    if (query.filters.evidenceMode === "both-confirmed" && !(event.grounded_from && event.grounded_to)) {
+      return false;
+    }
+    if (!matchesTextQuery(event, query.textQuery.trim())) {
+      return false;
+    }
+    if (
+      query.focus.allianceId !== null &&
+      event.from_alliance_id !== query.focus.allianceId &&
+      event.to_alliance_id !== query.focus.allianceId
+    ) {
+      return false;
+    }
+    if (query.focus.edgeKey && keyForEvent(event) !== query.focus.edgeKey) {
+      return false;
+    }
+    if (query.focus.eventId && event.event_id !== query.focus.eventId) {
+      return false;
+    }
+    return true;
+  });
+
+  const sortedIndexes = applySort(filtered, events, query);
+  const result = {
+    indexes: sortedIndexes,
+    events: sortedIndexes.map((index) => events[index])
+  };
+
+  if (canUseCache) {
+    selectorCache.set(cacheKey, { key: cacheKey, indexes: sortedIndexes });
+    if (selectorCache.size > 60) {
+      const first = selectorCache.keys().next().value;
+      if (first) {
+        selectorCache.delete(first);
+      }
+    }
+  }
+
+  return result;
+}
+
+export function deriveNetworkEdges(
+  events: TimelapseEvent[],
+  indexes: number[],
+  playhead: string | null,
+  maxEdges: number
+): NetworkEdge[] {
+  const active = new Map<string, TimelapseEvent>();
+  let chronologicallyOrderedIndexes = networkOrderCache.get(indexes);
+  if (!chronologicallyOrderedIndexes) {
+    chronologicallyOrderedIndexes = [...indexes].sort((leftIndex, rightIndex) =>
+      compareEventChronology(events[leftIndex], events[rightIndex])
+    );
+    networkOrderCache.set(indexes, chronologicallyOrderedIndexes);
+  }
+
+  for (const index of chronologicallyOrderedIndexes) {
+    const event = events[index];
+    if (playhead && event.timestamp > playhead) {
+      break;
+    }
+    const key = keyForEvent(event);
+    if (event.action === "signed") {
+      active.delete(key);
+      active.set(key, event);
+    } else if (TERMINAL_ACTIONS.has(event.action)) {
+      active.delete(key);
+    }
+  }
+
+  const activeEvents = [...active.values()];
+  const keepCount = Math.max(maxEdges, 200);
+  const reduced = selectStableCappedActiveEvents(activeEvents, keepCount);
+
+  return reduced.map((event) => ({
+    key: keyForEvent(event),
+    eventId: event.event_id,
+    sourceId: String(event.from_alliance_id),
+    targetId: String(event.to_alliance_id),
+    sourceLabel: event.from_alliance_name || String(event.from_alliance_id),
+    targetLabel: event.to_alliance_name || String(event.to_alliance_id),
+    treatyType: event.treaty_type,
+    sourceType: event.source || "unknown",
+    confidence: event.confidence
+  }));
+}
+
+export function buildPulseSeries(
+  events: TimelapseEvent[],
+  indexes: number[],
+  maxPoints: number,
+  playhead: string | null
+): PulsePoint[] {
+  const dayMap = new Map<string, PulsePoint>();
+  for (const index of indexes) {
+    const event = events[index];
+    if (playhead && event.timestamp > playhead) {
+      continue;
+    }
+    const day = event.timestamp.slice(0, 10);
+    const row = dayMap.get(day) ?? { day, signed: 0, terminal: 0, inferred: 0 };
+    if (event.action === "signed") {
+      row.signed += 1;
+    }
+    if (TERMINAL_ACTIONS.has(event.action)) {
+      row.terminal += 1;
+    }
+    if (event.inferred) {
+      row.inferred += 1;
+    }
+    dayMap.set(day, row);
+  }
+
+  const rows = [...dayMap.values()].sort((a, b) => a.day.localeCompare(b.day));
+  if (rows.length <= maxPoints) {
+    return rows;
+  }
+
+  const bucketSize = Math.ceil(rows.length / maxPoints);
+  const bucketed: PulsePoint[] = [];
+  for (let start = 0; start < rows.length; start += bucketSize) {
+    const slice = rows.slice(start, start + bucketSize);
+    bucketed.push({
+      day: slice[0].day,
+      signed: slice.reduce((sum, row) => sum + row.signed, 0),
+      terminal: slice.reduce((sum, row) => sum + row.terminal, 0),
+      inferred: slice.reduce((sum, row) => sum + row.inferred, 0)
+    });
+  }
+  return bucketed;
+}
+
+export function countByAction(events: TimelapseEvent[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const event of events) {
+    counts[event.action] = (counts[event.action] ?? 0) + 1;
+  }
+  return counts;
+}
