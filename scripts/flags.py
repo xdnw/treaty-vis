@@ -6,12 +6,15 @@ import hashlib
 import io
 import json
 import math
+import os
+import random
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +92,43 @@ def parse_args() -> argparse.Namespace:
         help="Maximum number of unique normalized flags to keep",
     )
     parser.add_argument(
+        "--state-file",
+        default=str(WEB_WORK_DATA_DIR / "flag_download_state.json"),
+        help="JSON state file for resumable per-URL flag downloads",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        default=str(WEB_WORK_DATA_DIR / "flag_cache"),
+        help="Directory for cached raw flag downloads",
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=3,
+        help="Maximum retry attempts per URL for transient download failures",
+    )
+    parser.add_argument(
+        "--retry-base-delay",
+        type=float,
+        default=0.5,
+        help="Base retry delay in seconds (exponential backoff + jitter)",
+    )
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Retry URLs currently marked as failed in state",
+    )
+    parser.add_argument(
+        "--retry-failed-only",
+        action="store_true",
+        help="Process only failed URLs (plus stale downloaded records with missing cache)",
+    )
+    parser.add_argument(
+        "--reset-failures",
+        action="store_true",
+        help="Reset failed URL records to pending before building the worklist",
+    )
+    parser.add_argument(
         "--alliances-index-url",
         default=DEFAULT_ALLIANCES_INDEX_URL,
         help="Index URL for alliance archives (used when downloading missing files)",
@@ -115,6 +155,10 @@ def normalize_header(value: Any) -> str:
 
 def dt_to_iso(ts: datetime) -> str:
     return ts.isoformat().replace("+00:00", "Z")
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def normalize_text(value: Any) -> str:
@@ -321,6 +365,146 @@ def validate_runtime_args(args: argparse.Namespace) -> None:
         raise RuntimeError("max download bytes must be positive")
     if args.max_flags <= 0:
         raise RuntimeError("max flags must be positive")
+    if args.max_retries < 0:
+        raise RuntimeError("max retries must be >= 0")
+    if args.retry_base_delay < 0:
+        raise RuntimeError("retry base delay must be >= 0")
+
+
+def atomic_write_bytes(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_bytes(payload)
+    last_error: Exception | None = None
+    for attempt in range(8):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.05 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
+    os.replace(tmp_path, path)
+
+
+def atomic_write_json(path: Path, payload: Any) -> None:
+    data = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True)
+    atomic_write_bytes(path, data.encode("utf-8"))
+
+
+def atomic_replace_file(src: Path, dest: Path) -> None:
+    last_error: Exception | None = None
+    for attempt in range(8):
+        try:
+            os.replace(src, dest)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.05 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
+    os.replace(src, dest)
+
+
+def load_json_or_default(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def default_download_state() -> dict[str, Any]:
+    now = utc_now_iso()
+    return {
+        "schema_version": 1,
+        "created_at": now,
+        "updated_at": now,
+        "urls": {},
+    }
+
+
+def load_download_state(path: Path) -> dict[str, Any]:
+    loaded = load_json_or_default(path, default_download_state())
+    if not isinstance(loaded, dict):
+        return default_download_state()
+
+    if not isinstance(loaded.get("urls"), dict):
+        loaded["urls"] = {}
+    if "schema_version" not in loaded:
+        loaded["schema_version"] = 1
+    if "created_at" not in loaded:
+        loaded["created_at"] = utc_now_iso()
+    if "updated_at" not in loaded:
+        loaded["updated_at"] = utc_now_iso()
+    return loaded
+
+
+def persist_download_state(path: Path, state: dict[str, Any]) -> None:
+    state["updated_at"] = utc_now_iso()
+    atomic_write_json(path, state)
+
+
+def cache_extension_for_url(url: str) -> str:
+    try:
+        parsed = urllib.parse.urlparse(url)
+        suffix = Path(parsed.path).suffix.lower()
+    except Exception:
+        suffix = ""
+    if suffix in {".png", ".webp", ".jpg", ".jpeg", ".gif", ".bmp", ".svg", ".avif"}:
+        return suffix
+    return ".bin"
+
+
+def default_cache_filename(url: str) -> str:
+    digest = hashlib.sha256(url.encode("utf-8", errors="replace")).hexdigest()
+    return f"{digest}{cache_extension_for_url(url)}"
+
+
+def resolve_cache_path(cache_dir: Path, entry: dict[str, Any], url: str) -> Path:
+    cache_file = str(entry.get("cache_file") or "").strip()
+    if not cache_file:
+        cache_file = default_cache_filename(url)
+        entry["cache_file"] = cache_file
+    return cache_dir / cache_file
+
+
+def upsert_url_state(
+    *,
+    state: dict[str, Any],
+    url: str,
+    status: str,
+    cache_file: str | None = None,
+    last_error: str | None = None,
+    content_sha256: str | None = None,
+    http_status: int | None = None,
+    increment_attempts: bool = False,
+) -> dict[str, Any]:
+    url_states = state.setdefault("urls", {})
+    current = url_states.get(url)
+    if not isinstance(current, dict):
+        current = {}
+
+    attempts = int(current.get("attempts", 0)) + (1 if increment_attempts else 0)
+    next_item: dict[str, Any] = {
+        "status": status,
+        "attempts": attempts,
+        "updated_at": utc_now_iso(),
+        "last_error": "",
+        "cache_file": cache_file or str(current.get("cache_file") or ""),
+        "content_sha256": content_sha256 or str(current.get("content_sha256") or ""),
+    }
+    if last_error:
+        next_item["last_error"] = last_error
+    if http_status is not None:
+        next_item["http_status"] = int(http_status)
+    elif "http_status" in current:
+        next_item["http_status"] = current["http_status"]
+
+    url_states[url] = next_item
+    return next_item
 
 
 def is_supported_remote_url(url: str) -> bool:
@@ -331,15 +515,55 @@ def is_supported_remote_url(url: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def download_image_bytes(url: str, timeout_seconds: float, max_download_bytes: int) -> bytes:
+def download_image_bytes(url: str, timeout_seconds: float, max_download_bytes: int) -> tuple[bytes, int | None]:
     req = urllib.request.Request(url, headers={"User-Agent": "treaty-vis-flags/1.0"})
     with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
         data = response.read(max_download_bytes + 1)
+        http_status = getattr(response, "status", None)
     if len(data) > max_download_bytes:
         raise RuntimeError(f"download too large (>{max_download_bytes} bytes)")
     if not data:
         raise RuntimeError("empty download")
-    return data
+    return data, http_status
+
+
+def is_transient_download_error(exc: Exception) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, urllib.error.URLError):
+        return True
+    if isinstance(exc, urllib.error.HTTPError):
+        return int(exc.code) in {408, 409, 425, 429, 500, 502, 503, 504}
+    return False
+
+
+def download_with_retries(
+    *,
+    url: str,
+    timeout_seconds: float,
+    max_download_bytes: int,
+    max_retries: int,
+    retry_base_delay: float,
+) -> tuple[bytes, int | None]:
+    attempts_total = max(1, max_retries + 1)
+    last_error: Exception | None = None
+    for attempt in range(attempts_total):
+        try:
+            return download_image_bytes(url, timeout_seconds=timeout_seconds, max_download_bytes=max_download_bytes)
+        except Exception as exc:
+            last_error = exc
+            if attempt >= (attempts_total - 1):
+                break
+            if not is_transient_download_error(exc):
+                break
+            base = retry_base_delay * (2**attempt)
+            jitter = random.uniform(0.0, max(retry_base_delay, 0.001))
+            delay = min(base + jitter, 30.0)
+            if delay > 0:
+                time.sleep(delay)
+
+    assert last_error is not None
+    raise last_error
 
 
 def normalize_image_bytes(image_bytes: bytes, tile_width: int, tile_height: int) -> Image.Image:
@@ -368,6 +592,13 @@ def collect_flag_assets(
     timeout_seconds: float,
     max_download_bytes: int,
     max_flags: int,
+    state_file: Path,
+    cache_dir: Path,
+    max_retries: int,
+    retry_base_delay: float,
+    retry_failed: bool,
+    retry_failed_only: bool,
+    reset_failures: bool,
 ) -> tuple[dict[str, str], dict[str, Image.Image], dict[str, str]]:
     url_set: set[str] = set()
     for event in events:
@@ -379,27 +610,144 @@ def collect_flag_assets(
             url_set.add(prev)
 
     all_urls = sorted(url_set)
-    progress = ProgressReporter(label="[flags] image progress", total=len(all_urls), unit="urls", non_tty_every=100)
+    state = load_download_state(state_file)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    if reset_failures:
+        for item in state.get("urls", {}).values():
+            if isinstance(item, dict) and str(item.get("status") or "") == "failed":
+                item["status"] = "pending"
+                item["last_error"] = ""
+                item["updated_at"] = utc_now_iso()
+        persist_download_state(state_file, state)
+
+    stale_repairs = 0
+    worklist: list[tuple[str, dict[str, Any], bool]] = []
+    for url in all_urls:
+        item = state.setdefault("urls", {}).get(url)
+        if not isinstance(item, dict):
+            item = upsert_url_state(state=state, url=url, status="pending")
+
+        cache_path = resolve_cache_path(cache_dir, item, url)
+        status = str(item.get("status") or "pending")
+        repaired_stale = False
+
+        if status == "downloaded" and not cache_path.exists():
+            stale_repairs += 1
+            repaired_stale = True
+            item = upsert_url_state(
+                state=state,
+                url=url,
+                status="pending",
+                cache_file=cache_path.name,
+                last_error="cache file missing; marked pending for repair",
+            )
+            status = "pending"
+
+        include = False
+        if status in {"pending", "new", "queued"}:
+            include = (not retry_failed_only) or repaired_stale
+        elif status == "failed":
+            include = bool(retry_failed or retry_failed_only)
+        elif status == "downloaded":
+            include = False
+        else:
+            include = not retry_failed_only
+
+        worklist.append((url, item, include))
+
+    persist_download_state(state_file, state)
+
+    queued = [entry for entry in worklist if entry[2]]
+    progress = ProgressReporter(label="[flags] image progress", total=len(queued), unit="urls", non_tty_every=100)
 
     url_to_hash: dict[str, str] = {}
     hash_to_image: dict[str, Image.Image] = {}
     hash_failures = 0
+    skipped_downloaded = 0
+    skipped_non_retry = 0
 
-    for index, url in enumerate(all_urls):
-        done = index == (len(all_urls) - 1)
+    # Prime cached downloaded URLs so event mapping stays complete on resumed runs.
+    for url, item, include in worklist:
+        if include:
+            continue
+        cache_path = resolve_cache_path(cache_dir, item, url)
+        status = str(item.get("status") or "")
+        if status == "downloaded" and cache_path.exists():
+            try:
+                raw = cache_path.read_bytes()
+                normalized = normalize_image_bytes(raw, tile_width=tile_width, tile_height=tile_height)
+                image_hash = hash_normalized_image(normalized)
+                url_to_hash[url] = image_hash
+                if image_hash not in hash_to_image:
+                    hash_to_image[image_hash] = normalized
+                skipped_downloaded += 1
+            except Exception as exc:
+                hash_failures += 1
+                upsert_url_state(
+                    state=state,
+                    url=url,
+                    status="failed",
+                    cache_file=cache_path.name,
+                    last_error=f"cached decode failed: {exc}",
+                )
+                persist_download_state(state_file, state)
+        else:
+            skipped_non_retry += 1
+
+    for queue_index, (url, item, _) in enumerate(queued):
+        done = queue_index == (len(queued) - 1)
+        cache_path = resolve_cache_path(cache_dir, item, url)
+
         if not is_supported_remote_url(url):
             hash_failures += 1
             print(f"[flags] warning: skipping unsupported flag url: {url}", file=sys.stderr)
+            upsert_url_state(
+                state=state,
+                url=url,
+                status="failed",
+                cache_file=cache_path.name,
+                last_error="unsupported url scheme",
+            )
+            persist_download_state(state_file, state)
             progress.step(kept=len(hash_to_image), failed=hash_failures, done=done)
             continue
 
         try:
-            raw = download_image_bytes(url, timeout_seconds=timeout_seconds, max_download_bytes=max_download_bytes)
+            upsert_url_state(
+                state=state,
+                url=url,
+                status="pending",
+                cache_file=cache_path.name,
+                increment_attempts=True,
+            )
+            if cache_path.exists():
+                raw = cache_path.read_bytes()
+                http_status = item.get("http_status")
+            else:
+                raw, http_status = download_with_retries(
+                    url=url,
+                    timeout_seconds=timeout_seconds,
+                    max_download_bytes=max_download_bytes,
+                    max_retries=max_retries,
+                    retry_base_delay=retry_base_delay,
+                )
+                atomic_write_bytes(cache_path, raw)
+
             normalized = normalize_image_bytes(raw, tile_width=tile_width, tile_height=tile_height)
             image_hash = hash_normalized_image(normalized)
+            content_sha256 = hashlib.sha256(raw).hexdigest()
         except Exception as exc:
             hash_failures += 1
             print(f"[flags] warning: failed flag download/decode {url}: {exc}", file=sys.stderr)
+            upsert_url_state(
+                state=state,
+                url=url,
+                status="failed",
+                cache_file=cache_path.name,
+                last_error=str(exc),
+            )
+            persist_download_state(state_file, state)
             progress.step(kept=len(hash_to_image), failed=hash_failures, done=done)
             continue
 
@@ -407,6 +755,16 @@ def collect_flag_assets(
         if image_hash not in hash_to_image:
             hash_to_image[image_hash] = normalized
 
+        upsert_url_state(
+            state=state,
+            url=url,
+            status="downloaded",
+            cache_file=cache_path.name,
+            content_sha256=content_sha256,
+            http_status=int(http_status) if http_status is not None else None,
+            last_error="",
+        )
+        persist_download_state(state_file, state)
         progress.step(kept=len(hash_to_image), failed=hash_failures, done=done)
 
     sorted_hashes = sorted(hash_to_image.keys())
@@ -420,7 +778,13 @@ def collect_flag_assets(
         hash_to_key[image_hash] = f"f{index:x}"
 
     print(
-        f"[flags] image totals: urls={len(all_urls)}, unique={len(sorted_hashes)}, failures={hash_failures}",
+        "[flags] image totals: "
+        f"urls={len(all_urls)}, "
+        f"queued={len(queued)}, "
+        f"stale_repairs={stale_repairs}, "
+        f"skipped_downloaded={skipped_downloaded}, "
+        f"skipped_non_retry={skipped_non_retry}, "
+        f"unique={len(sorted_hashes)}, failures={hash_failures}",
         file=sys.stderr,
     )
 
@@ -434,15 +798,11 @@ def build_runtime_events(
     hash_to_key: dict[str, str],
 ) -> list[dict[str, Any]]:
     runtime_events: list[dict[str, Any]] = []
-    dropped = 0
 
     for event in raw_events:
         raw_url = str(event.get("raw_flag_url") or "").strip()
         current_hash = url_to_hash.get(raw_url)
-        current_key = hash_to_key.get(current_hash or "") if current_hash else None
-        if not current_key:
-            dropped += 1
-            continue
+        current_key = hash_to_key.get(current_hash or "") if current_hash else ""
 
         out: dict[str, Any] = {
             "timestamp": event["timestamp"],
@@ -461,9 +821,6 @@ def build_runtime_events(
                 out["previous_flag_key"] = prev_key
 
         runtime_events.append(out)
-
-    if dropped:
-        print(f"[flags] warning: dropped {dropped} events with unresolved flag assets", file=sys.stderr)
 
     return runtime_events
 
@@ -532,23 +889,27 @@ def write_outputs(
     atlas_png_output_path.parent.mkdir(parents=True, exist_ok=True)
 
     flags_payload = {"events": runtime_events}
-    flags_output_path.write_bytes(msgpack.packb(flags_payload, use_bin_type=True))
+    atomic_write_bytes(flags_output_path, msgpack.packb(flags_payload, use_bin_type=True))
 
     atlas_meta_with_paths = {
         **atlas_meta,
-        "webp": atlas_webp_output_path.name,
-        "png": atlas_png_output_path.name,
+        "webp": f"/data/{atlas_webp_output_path.name}",
+        "png": f"/data/{atlas_png_output_path.name}",
     }
     assets_payload = {"atlas": atlas_meta_with_paths, "assets": assets}
-    assets_output_path.write_bytes(msgpack.packb(assets_payload, use_bin_type=True))
+    atomic_write_bytes(assets_output_path, msgpack.packb(assets_payload, use_bin_type=True))
 
     try:
-        atlas.save(atlas_png_output_path, format="PNG")
+        atlas_png_tmp_path = atlas_png_output_path.with_suffix(atlas_png_output_path.suffix + ".tmp")
+        atlas.save(atlas_png_tmp_path, format="PNG")
+        atomic_replace_file(atlas_png_tmp_path, atlas_png_output_path)
     except Exception as exc:
         raise RuntimeError(f"failed to write PNG atlas: {exc}") from exc
 
     try:
-        atlas.save(atlas_webp_output_path, format="WEBP", lossless=True, method=6)
+        atlas_webp_tmp_path = atlas_webp_output_path.with_suffix(atlas_webp_output_path.suffix + ".tmp")
+        atlas.save(atlas_webp_tmp_path, format="WEBP", lossless=True, method=6)
+        atomic_replace_file(atlas_webp_tmp_path, atlas_webp_output_path)
     except Exception as exc:
         raise RuntimeError(f"failed to write WEBP atlas: {exc}") from exc
 
@@ -563,6 +924,8 @@ def main() -> int:
     assets_output_path = Path(args.assets_output).resolve()
     atlas_webp_output_path = Path(args.atlas_webp_output).resolve()
     atlas_png_output_path = Path(args.atlas_png_output).resolve()
+    state_file = Path(args.state_file).resolve()
+    cache_dir = Path(args.cache_dir).resolve()
 
     files, archive_flags = prepare_alliance_archives(
         alliances_dir=alliances_dir,
@@ -587,6 +950,13 @@ def main() -> int:
         timeout_seconds=float(args.download_timeout_seconds),
         max_download_bytes=int(args.max_download_bytes),
         max_flags=int(args.max_flags),
+        state_file=state_file,
+        cache_dir=cache_dir,
+        max_retries=int(args.max_retries),
+        retry_base_delay=float(args.retry_base_delay),
+        retry_failed=bool(args.retry_failed),
+        retry_failed_only=bool(args.retry_failed_only),
+        reset_failures=bool(args.reset_failures),
     )
     runtime_events = build_runtime_events(raw_events, url_to_hash=url_to_hash, hash_to_key=hash_to_key)
     atlas, atlas_meta, assets = build_flag_atlas(

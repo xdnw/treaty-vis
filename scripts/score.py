@@ -4,6 +4,7 @@ import argparse
 import csv
 import io
 import json
+import msgpack
 import sys
 import zipfile
 from pathlib import Path
@@ -32,8 +33,8 @@ def parse_args() -> argparse.Namespace:
 	)
 	parser.add_argument(
 		"--output",
-		default=str(WEB_PUBLIC_DATA_DIR / "alliance_scores_daily.json"),
-		help="Output JSON path",
+		default=str(WEB_PUBLIC_DATA_DIR / "alliance_scores_daily.msgpack"),
+		help="Output MessagePack path",
 	)
 	parser.add_argument(
 		"--alliances-index-url",
@@ -48,7 +49,7 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--pretty",
 		action="store_true",
-		help="Pretty-print output JSON",
+		help="Deprecated no-op retained for CLI compatibility",
 	)
 	return parser.parse_args()
 
@@ -225,11 +226,7 @@ def main() -> int:
 	payload = {"scores_by_day": scores_by_day}
 
 	output_path.parent.mkdir(parents=True, exist_ok=True)
-	if args.pretty:
-		output_text = json.dumps(payload, indent=2, ensure_ascii=True) + "\n"
-	else:
-		output_text = json.dumps(payload, separators=(",", ":"), ensure_ascii=True) + "\n"
-	output_path.write_text(output_text, encoding="utf-8")
+	output_path.write_bytes(msgpack.packb(payload, use_bin_type=True))
 
 	print(
 		f"[score] wrote {output_path} "

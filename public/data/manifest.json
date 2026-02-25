@@ -1,0 +1,26 @@
+{
+  "generatedAt": "2026-02-24T20:33:53.136Z",
+  "files": {
+    "treaty_changes_reconciled.msgpack": {
+      "sizeBytes": 10216509,
+      "sha256": "fbdbeac50004ec340041990197730aec9674542bb7284afd1f90128e4df89f14"
+    },
+    "treaty_changes_reconciled_summary.msgpack": {
+      "sizeBytes": 823,
+      "sha256": "de0fb394e817c6343c5790d8943db75973e0525c56d1d6fcae8de1467df8ab81"
+    },
+    "treaty_changes_reconciled_flags.msgpack": {
+      "sizeBytes": 1218,
+      "sha256": "1a2a59b2c0be11c2878b4f7bdbd405edc004f33f774c7915ca7ba88bb576489d"
+    },
+    "flags.msgpack": {
+      "sizeBytes": 3042706,
+      "sha256": "dab66dd6b6e733aebf35dda31954d4e953cbb28438527e681d26d1d6eb34a0a8"
+    },
+    "alliance_scores_daily.msgpack": {
+      "sizeBytes": 14691236,
+      "sha256": "f6792ee29ad5b25abe373e758c4da51cf2ebb41ddb4f983be4748a29b48e7412"
+    }
+  },
+  "datasetId": "fd5a7e09169a9908"
+}

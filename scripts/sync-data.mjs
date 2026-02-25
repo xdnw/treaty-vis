@@ -9,7 +9,7 @@ const requiredFiles = [
   "treaty_changes_reconciled_summary.msgpack",
   "treaty_changes_reconciled_flags.msgpack",
   "flags.msgpack",
-  "alliance_scores_daily.json"
+  "alliance_scores_daily.msgpack"
 ];
 
 async function fileHash(filePath) {

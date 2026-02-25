@@ -15,7 +15,8 @@ function makeQuery(): QueryState {
       includeInferred: true,
       includeNoise: true,
       evidenceMode: "all",
-      sizeByScore: false
+      sizeByScore: false,
+      showFlags: false
     },
     textQuery: "",
     sort: { field: "timestamp", direction: "desc" }

@@ -184,12 +184,13 @@ async function loadPayload(includeFlags: boolean): Promise<LoaderWorkerPayload> 
           })
           .catch(() => null)
       : Promise.resolve(null),
-    fetch("/data/alliance_scores_daily.json")
+    fetch("/data/alliance_scores_daily.msgpack")
       .then(async (response) => {
         if (!response.ok) {
           return null;
         }
-        return (await response.json()) as unknown;
+        const body = await response.arrayBuffer();
+        return decode(new Uint8Array(body)) as unknown;
       })
       .catch(() => null),
     fetch("/data/manifest.json")
