@@ -1,3 +1,5 @@
+import type { NetworkLayoutStrategy, NetworkLayoutStrategyConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
+
 export type WorkerEvidenceMode = "all" | "one-confirmed" | "both-confirmed";
 export type WorkerSortField = "timestamp" | "action" | "type" | "from" | "to" | "source";
 export type WorkerSortDirection = "asc" | "desc";
@@ -113,6 +115,8 @@ export type LoaderWorkerRequest =
       query: WorkerQueryState;
       playhead: string | null;
       maxEdges: number;
+      strategy: NetworkLayoutStrategy;
+      strategyConfig?: NetworkLayoutStrategyConfig;
     }
   | {
       kind: "pulse";

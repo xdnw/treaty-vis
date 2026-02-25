@@ -16,6 +16,7 @@ import {
   type TimelapseManifest,
   type TimelapseSummary
 } from "@/domain/timelapse/schema";
+import type { NetworkLayoutStrategy, NetworkLayoutStrategyConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
 import { buildTimelapseIndices, type TimelapseIndices } from "@/domain/timelapse/selectors";
 import type { QueryState } from "@/features/filters/filterStore";
 import type {
@@ -503,7 +504,9 @@ export async function selectTimelapsePulse(
 export async function selectTimelapseNetworkEventIndexes(
   query: QueryState,
   playhead: string | null,
-  maxEdges: number
+  maxEdges: number,
+  strategy: NetworkLayoutStrategy,
+  strategyConfig?: NetworkLayoutStrategyConfig
 ): Promise<TimelapseNetworkSelection> {
   if (typeof Worker === "undefined") {
     throw new Error("Timelapse network worker is unavailable in this environment.");
@@ -529,7 +532,9 @@ export async function selectTimelapseNetworkEventIndexes(
       requestId,
       query: toWorkerQueryState(query),
       playhead,
-      maxEdges
+      maxEdges,
+      strategy,
+      strategyConfig
     };
     worker.postMessage(request);
   });

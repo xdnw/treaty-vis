@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { selectTimelapseNetworkEventIndexes } from "@/domain/timelapse/loader";
+import type { NetworkLayoutStrategy, NetworkLayoutStrategyConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
 import type { WorkerNetworkLayout } from "@/domain/timelapse/workerProtocol";
 import type { QueryState } from "@/features/filters/filterStore";
 import { markTimelapsePerf } from "@/lib/perf";
@@ -22,14 +23,18 @@ type RequestSnapshot = {
   baseQuery: QueryState;
   playhead: string | null;
   maxEdges: number;
+  strategy: NetworkLayoutStrategy;
+  strategyConfig?: NetworkLayoutStrategyConfig;
 };
 
 export function useNetworkWorkerIndexes(params: {
   baseQuery: QueryState;
   playhead: string | null;
   maxEdges: number;
+  strategy: NetworkLayoutStrategy;
+  strategyConfig?: NetworkLayoutStrategyConfig;
 }) {
-  const { baseQuery, playhead, maxEdges } = params;
+  const { baseQuery, playhead, maxEdges, strategy, strategyConfig } = params;
   const [workerNetworkIndexes, setWorkerNetworkIndexes] = useState<WorkerNetworkIndexes | null>(null);
   const [workerError, setWorkerError] = useState<string | null>(null);
   const [requestLifecycle, setRequestLifecycle] = useState<NetworkRequestLifecycle | null>(null);
@@ -45,7 +50,13 @@ export function useNetworkWorkerIndexes(params: {
     const run = async () => {
       inFlightRef.current = true;
       try {
-        const response = await selectTimelapseNetworkEventIndexes(snapshot.baseQuery, snapshot.playhead, snapshot.maxEdges);
+        const response = await selectTimelapseNetworkEventIndexes(
+          snapshot.baseQuery,
+          snapshot.playhead,
+          snapshot.maxEdges,
+          snapshot.strategy,
+          snapshot.strategyConfig
+        );
 
         if (!isMountedRef.current || snapshot.requestId < latestAcceptedRequestIdRef.current) {
           return;
@@ -109,7 +120,9 @@ export function useNetworkWorkerIndexes(params: {
       requestedAt: performance.now(),
       baseQuery,
       playhead,
-      maxEdges
+      maxEdges,
+      strategy,
+      strategyConfig
     };
 
     if (inFlightRef.current) {
@@ -117,7 +130,7 @@ export function useNetworkWorkerIndexes(params: {
     } else {
       startRequestRef.current(snapshot);
     }
-  }, [baseQuery, maxEdges, playhead]);
+  }, [baseQuery, maxEdges, playhead, strategy, strategyConfig]);
 
   return {
     workerEdgeEventIndexes: workerNetworkIndexes?.edgeEventIndexes ?? null,

@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Graph from "graphology";
 import Sigma from "sigma";
+import {
+  DEFAULT_NETWORK_LAYOUT_STRATEGY,
+  NETWORK_LAYOUT_STRATEGY_OPTIONS,
+  createInitialStrategyConfig,
+  getStrategyFields,
+  getStrategyLabel,
+  summarizeStrategyConfig
+} from "@/domain/timelapse/networkLayout/NetworkLayoutStrategyControls";
+import type { NetworkLayoutStrategy, NetworkLayoutStrategyConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
 import type { ScoreLoaderSnapshot } from "@/domain/timelapse/scoreLoader";
 import type { AllianceFlagSnapshot, AllianceScoresByDay, FlagAssetsPayload, TimelapseEvent } from "@/domain/timelapse/schema";
 import { resolveScoreRowForPlayhead } from "@/domain/timelapse/scoreDay";
@@ -50,7 +59,6 @@ const FLAG_SIZE_TO_NODE_RATIO = 1.45;
 const FLAG_MIN_DRAW_SIZE = 10;
 const GRAPH_BUILD_BUDGET_MS = 16;
 const RENDERER_REFRESH_BUDGET_MS = 10;
-
 type ZoomBand = "zoomed-out" | "mid" | "zoomed-in";
 
 
@@ -339,6 +347,15 @@ export function NetworkView({
   const [atlasReady, setAtlasReady] = useState(false);
   const [framePressureLevel, setFramePressureLevel] = useState<FlagPressureLevel>("none");
   const [layoutRelaxToken, setLayoutRelaxToken] = useState(0);
+  const [showStrategyConfig, setShowStrategyConfig] = useState(false);
+  const [networkLayoutStrategy, setNetworkLayoutStrategy] = useState<NetworkLayoutStrategy>(
+    DEFAULT_NETWORK_LAYOUT_STRATEGY
+  );
+  const [strategyConfigByStrategy, setStrategyConfigByStrategy] = useState<
+    Partial<Record<NetworkLayoutStrategy, NetworkLayoutStrategyConfig>>
+  >(() => ({
+    [DEFAULT_NETWORK_LAYOUT_STRATEGY]: createInitialStrategyConfig(DEFAULT_NETWORK_LAYOUT_STRATEGY)
+  }));
   const [rendererInitError, setRendererInitError] = useState<string | null>(null);
   const refreshFrameRef = useRef<number | null>(null);
   const lastRendererRefreshMsRef = useRef(0);
@@ -471,10 +488,29 @@ export function NetworkView({
     return allEvents[quantizedIndex]?.timestamp ?? playhead;
   }, [allEvents, baseQuery.playback.speed, isPlaying, playhead]);
 
+  const activeStrategyConfig = useMemo(
+    () => strategyConfigByStrategy[networkLayoutStrategy] ?? createInitialStrategyConfig(networkLayoutStrategy),
+    [networkLayoutStrategy, strategyConfigByStrategy]
+  );
+
+  const strategyConfigSummary = useMemo(
+    () => summarizeStrategyConfig(networkLayoutStrategy, activeStrategyConfig),
+    [activeStrategyConfig, networkLayoutStrategy]
+  );
+
+  const strategyLabel = useMemo(
+    () => getStrategyLabel(networkLayoutStrategy),
+    [networkLayoutStrategy]
+  );
+
+  const strategyFields = useMemo(() => getStrategyFields(networkLayoutStrategy), [networkLayoutStrategy]);
+
   const { workerEdgeEventIndexes, workerLayout, workerRequestLifecycle, workerError } = useNetworkWorkerIndexes({
     baseQuery,
     playhead: networkSelectionPlayhead,
-    maxEdges
+    maxEdges,
+    strategy: networkLayoutStrategy,
+    strategyConfig: activeStrategyConfig
   });
 
   const allianceNameById = useMemo(() => {
@@ -826,7 +862,7 @@ export function NetworkView({
       usedDayFallback: scoreResolution.usedFallback,
       scoreDay,
       graphBuildMs,
-      layoutStrategy: "worker-connected",
+      layoutStrategy: networkLayoutStrategy,
       averageStepDisplacement: averageDisplacement,
       maxStepDisplacement: displacementMax,
       relaxAppliedToken: applyRelaxLayout ? layoutRelaxToken : 0
@@ -852,6 +888,7 @@ export function NetworkView({
     scoreSizeContrast,
     showFlags,
     sizeByScore,
+    networkLayoutStrategy,
     workerLayout
   ]);
 
@@ -1429,7 +1466,36 @@ export function NetworkView({
         graph={graph}
         budgetPreset={budgetPreset}
         anchoredCount={anchoredAllianceIds.length}
+        strategy={networkLayoutStrategy}
+        strategyLabel={strategyLabel}
+        strategyConfigSummary={strategyConfigSummary}
+        strategyOptions={NETWORK_LAYOUT_STRATEGY_OPTIONS}
+        showStrategyConfig={showStrategyConfig}
+        strategyFields={strategyFields}
+        strategyConfig={activeStrategyConfig}
         onBudgetChange={setBudgetPreset}
+        onStrategyChange={(nextStrategy) => {
+          setNetworkLayoutStrategy(nextStrategy);
+          setStrategyConfigByStrategy((current) => {
+            if (current[nextStrategy]) {
+              return current;
+            }
+            return {
+              ...current,
+              [nextStrategy]: createInitialStrategyConfig(nextStrategy)
+            };
+          });
+        }}
+        onToggleStrategyConfig={() => setShowStrategyConfig((current) => !current)}
+        onStrategyFieldChange={(key, value) => {
+          setStrategyConfigByStrategy((current) => ({
+            ...current,
+            [networkLayoutStrategy]: {
+              ...(current[networkLayoutStrategy] ?? createInitialStrategyConfig(networkLayoutStrategy)),
+              [key]: value
+            }
+          }));
+        }}
         onClearAnchors={() => setAnchoredAllianceIds([])}
         onRelaxLayout={() => setLayoutRelaxToken((current) => current + 1)}
         onEnterFullscreen={onEnterFullscreen}

@@ -15,7 +15,9 @@ const selectTimelapseNetworkEventIndexesMock = vi.fn<
   (
     query: QueryState,
     playhead: string | null,
-    maxEdges: number
+    maxEdges: number,
+    strategy: "hybrid-backbone" | "fa2line",
+    strategyConfig?: Record<string, unknown>
   ) => Promise<{
     edgeEventIndexes: Uint32Array;
     layout: { components: []; communities: []; nodeTargets: [] };
@@ -143,7 +145,8 @@ function NetworkProbe({ query, playhead }: NetworkProbeProps) {
   const { workerEdgeEventIndexes, workerError } = useNetworkWorkerIndexes({
     baseQuery: query,
     playhead,
-    maxEdges: 200
+    maxEdges: 200,
+    strategy: "hybrid-backbone"
   });
 
   return (
