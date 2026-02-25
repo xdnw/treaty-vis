@@ -199,6 +199,12 @@ export function App() {
   );
 
   const scoreFileDeclared = Boolean(bundle?.manifest?.files?.["alliance_scores_daily.msgpack"]);
+  const hasScoreRankData = useMemo(() => {
+    if (!bundle?.allianceScoreRanksByDay) {
+      return false;
+    }
+    return Object.keys(bundle.allianceScoreRanksByDay).length > 0;
+  }, [bundle?.allianceScoreRanksByDay]);
 
   useEffect(() => {
     if (!bundle) {
@@ -376,13 +382,6 @@ export function App() {
     () => workerPulse ?? buildPulseSeries(bundle?.events ?? [], scopedSelectionIndexes, 280, null),
     [bundle?.events, scopedSelectionIndexes, workerPulse]
   );
-
-  const hasScoreRankData = useMemo(() => {
-    if (!bundle?.allianceScoreRanksByDay) {
-      return false;
-    }
-    return Object.keys(bundle.allianceScoreRanksByDay).length > 0;
-  }, [bundle?.allianceScoreRanksByDay]);
 
   const hasScoreData = Boolean(
     (allianceScoresByDay && Object.keys(allianceScoresByDay).length > 0) ||

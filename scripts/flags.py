@@ -14,6 +14,7 @@ import socket
 import sys
 import threading
 import time
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -539,6 +540,48 @@ def download_image_bytes(url: str, timeout_seconds: float, max_download_bytes: i
     return data, http_status
 
 
+WIKIMEDIA_THUMB_WIDTH_RE = re.compile(r"^(?P<width>\d+)px-")
+
+
+def build_download_url_candidates(url: str) -> list[str]:
+    candidates = [url]
+
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return candidates
+
+    host = str(parsed.netloc or "").lower()
+    if host != "upload.wikimedia.org":
+        return candidates
+
+    parts = [segment for segment in parsed.path.split("/") if segment]
+    # Expected thumb shape: /wikipedia/<lang>/thumb/<hash1>/<hash2>/<file>/<size>-<file>.png
+    if len(parts) < 7 or parts[0] != "wikipedia" or parts[2] != "thumb":
+        return candidates
+
+    lang = parts[1]
+    file_name = parts[5]
+    size_token = parts[6]
+    width_match = WIKIMEDIA_THUMB_WIDTH_RE.match(size_token)
+    width = width_match.group("width") if width_match else ""
+    encoded_file_name = urllib.parse.quote(file_name)
+
+    special_hosts: list[str] = []
+    if lang and lang != "commons":
+        special_hosts.append(f"{lang}.wikipedia.org")
+    special_hosts.append("commons.wikimedia.org")
+
+    for special_host in special_hosts:
+        special_url = f"https://{special_host}/wiki/Special:FilePath/{encoded_file_name}"
+        if width:
+            special_url = f"{special_url}?width={width}"
+        if special_url not in candidates:
+            candidates.append(special_url)
+
+    return candidates
+
+
 def is_transient_download_error(exc: Exception) -> bool:
     if isinstance(exc, urllib.error.HTTPError):
         code = int(exc.code)
@@ -845,13 +888,35 @@ def collect_flag_assets(
                 raw = cache_path.read_bytes()
                 http_status = existing_http_status
             else:
-                raw, http_status = download_with_retries(
-                    url=url,
-                    timeout_seconds=timeout_seconds,
-                    max_download_bytes=max_download_bytes,
-                    max_retries=max_retries,
-                    retry_base_delay=retry_base_delay,
-                )
+                download_candidates = build_download_url_candidates(url)
+                last_error: Exception | None = None
+                raw = b""
+                http_status = None
+                for candidate_index, candidate_url in enumerate(download_candidates):
+                    try:
+                        raw, http_status = download_with_retries(
+                            url=candidate_url,
+                            timeout_seconds=timeout_seconds,
+                            max_download_bytes=max_download_bytes,
+                            max_retries=max_retries,
+                            retry_base_delay=retry_base_delay,
+                        )
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                        if candidate_index < (len(download_candidates) - 1):
+                            print(
+                                f"[flags] info: trying fallback url for {url}: {download_candidates[candidate_index + 1]}",
+                                file=sys.stderr,
+                            )
+                            continue
+                        raise
+
+                if not raw:
+                    if last_error is not None:
+                        raise last_error
+                    raise RuntimeError("empty download")
+
                 atomic_write_bytes(cache_path, raw)
 
             normalized = normalize_image_bytes(raw, tile_width=tile_width, tile_height=tile_height)
