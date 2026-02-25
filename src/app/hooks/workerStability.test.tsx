@@ -12,7 +12,16 @@ const selectTimelapsePulseMock = vi.fn<
   (query: QueryState, maxPoints: number, playhead: string | null) => Promise<Array<{ day: string; signed: number; terminal: number; inferred: number }>>
 >();
 const selectTimelapseNetworkEventIndexesMock = vi.fn<
-  (query: QueryState, playhead: string | null, maxEdges: number) => Promise<Uint32Array>
+  (
+    query: QueryState,
+    playhead: string | null,
+    maxEdges: number
+  ) => Promise<{
+    edgeEventIndexes: Uint32Array;
+    layout: { components: []; communities: []; nodeTargets: [] };
+    startedAt: number;
+    finishedAt: number;
+  }>
 >();
 
 vi.mock("@/domain/timelapse/loader", () => ({
@@ -202,9 +211,19 @@ describe("worker hook stability during refresh", () => {
   });
 
   it("keeps previous network edge indexes while next request is pending", async () => {
-    const nextEdges = createDeferred<Uint32Array>();
+    const nextEdges = createDeferred<{
+      edgeEventIndexes: Uint32Array;
+      layout: { components: []; communities: []; nodeTargets: [] };
+      startedAt: number;
+      finishedAt: number;
+    }>();
 
-    selectTimelapseNetworkEventIndexesMock.mockResolvedValueOnce(new Uint32Array([3, 4, 5]));
+    selectTimelapseNetworkEventIndexesMock.mockResolvedValueOnce({
+      edgeEventIndexes: new Uint32Array([3, 4, 5]),
+      layout: { components: [], communities: [], nodeTargets: [] },
+      startedAt: 10,
+      finishedAt: 12
+    });
     selectTimelapseNetworkEventIndexesMock.mockReturnValueOnce(nextEdges.promise);
 
     const container = document.createElement("div");
@@ -231,12 +250,85 @@ describe("worker hook stability during refresh", () => {
     expect(container.textContent).toContain("edges:3|error:0");
 
     await act(async () => {
-      nextEdges.resolve(new Uint32Array([9]));
+      nextEdges.resolve({
+        edgeEventIndexes: new Uint32Array([9]),
+        layout: { components: [], communities: [], nodeTargets: [] },
+        startedAt: 20,
+        finishedAt: 22
+      });
       await flush();
       await flush();
     });
 
     expect(container.textContent).toContain("edges:1|error:0");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("runs only latest pending network snapshot after in-flight completion", async () => {
+    const firstDeferred = createDeferred<{
+      edgeEventIndexes: Uint32Array;
+      layout: { components: []; communities: []; nodeTargets: [] };
+      startedAt: number;
+      finishedAt: number;
+    }>();
+
+    selectTimelapseNetworkEventIndexesMock.mockReturnValueOnce(firstDeferred.promise);
+    selectTimelapseNetworkEventIndexesMock.mockResolvedValueOnce({
+      edgeEventIndexes: new Uint32Array([42]),
+      layout: { components: [], communities: [], nodeTargets: [] },
+      startedAt: 30,
+      finishedAt: 35
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    const queryA = makeQuery({ textQuery: "a" });
+    const queryB = makeQuery({ textQuery: "b" });
+    const queryC = makeQuery({ textQuery: "c" });
+
+    await act(async () => {
+      root.render(<NetworkProbe query={queryA} playhead={null} />);
+      await flush();
+    });
+
+    await act(async () => {
+      root.render(<NetworkProbe query={queryB} playhead={null} />);
+      await flush();
+    });
+
+    await act(async () => {
+      root.render(<NetworkProbe query={queryC} playhead={null} />);
+      await flush();
+    });
+
+    await act(async () => {
+      firstDeferred.resolve({
+        edgeEventIndexes: new Uint32Array([1]),
+        layout: { components: [], communities: [], nodeTargets: [] },
+        startedAt: 1,
+        finishedAt: 3
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(selectTimelapseNetworkEventIndexesMock).toHaveBeenCalledTimes(2);
+    expect(selectTimelapseNetworkEventIndexesMock.mock.calls[1]?.[0].textQuery).toBe("c");
+    expect(container.textContent).toContain("edges:1|error:0");
+
+    await act(async () => {
+      await flush();
+      await flush();
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("error:0");
 
     await act(async () => {
       root.unmount();

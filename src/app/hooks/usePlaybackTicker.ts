@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { markTimelapsePerf } from "@/lib/perf";
 
 type PlaybackState = {
   isPlaying: boolean;
@@ -23,6 +24,7 @@ export function usePlaybackTicker(params: {
     let last = performance.now();
     let carry = 0;
     const frameBudgetMs = 380 / playback.speed;
+    const maxStepsPerFrame = 8;
     const currentTickIndex = timelineTicks.findIndex((item) => item === playback.playhead);
     const currentIndex = currentTickIndex >= 0 ? currentTickIndex : Math.max(timelineTicks.length - 1, 0);
     let nextIndex = currentIndex;
@@ -32,13 +34,26 @@ export function usePlaybackTicker(params: {
       last = now;
       carry += delta;
 
-      if (carry >= frameBudgetMs) {
-        carry = 0;
+      let steps = 0;
+      while (carry >= frameBudgetMs && steps < maxStepsPerFrame) {
+        carry -= frameBudgetMs;
         nextIndex += 1;
+        steps += 1;
         if (nextIndex >= timelineTicks.length) {
           setPlaying(false);
           return;
         }
+      }
+
+      if (steps >= maxStepsPerFrame && carry >= frameBudgetMs) {
+        markTimelapsePerf("playback.ticker.cappedSteps", 1);
+      }
+
+      if (steps > 1) {
+        markTimelapsePerf("playback.ticker.catchupSteps", steps);
+      }
+
+      if (steps > 0) {
         setPlayhead(timelineTicks[nextIndex]);
       }
       frame = requestAnimationFrame(tick);

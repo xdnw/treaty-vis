@@ -5,7 +5,7 @@ import type { ScoreLoaderSnapshot } from "@/domain/timelapse/scoreLoader";
 import type { AllianceFlagSnapshot, AllianceScoresByDay, FlagAssetsPayload, TimelapseEvent } from "@/domain/timelapse/schema";
 import { resolveScoreRowForPlayhead } from "@/domain/timelapse/scoreDay";
 import { type QueryState, useFilterStore } from "@/features/filters/filterStore";
-import { clampDisplacement, dampPosition, distanceBetween, resolveLayoutTargets, type Point } from "@/features/network/layout";
+import { clampDisplacement, dampPosition, distanceBetween, positionForNode, type Point } from "@/features/network/layout";
 import {
   FLAG_MAX_SPRITES,
   FLAG_PRESSURE_BUILD_MS,
@@ -18,12 +18,7 @@ import {
 } from "@/features/network/flagRender";
 import {
   NETWORK_LAYOUT_MAX_STEP_DISPLACEMENT,
-  NETWORK_LAYOUT_RELAX_MAX_OFFSET_BOOST,
   NETWORK_LAYOUT_RELAX_MAX_STEP_DISPLACEMENT,
-  NETWORK_LAYOUT_RELAX_TOPOLOGY_BOOST,
-  NETWORK_LAYOUT_STRATEGY,
-  NETWORK_LAYOUT_TOPOLOGY_MAX_OFFSET,
-  NETWORK_LAYOUT_TOPOLOGY_STRENGTH,
   buildHoverResetKey,
   derivePressureLevel,
   quantizePlayheadIndexForAutoplay,
@@ -53,6 +48,8 @@ const ZOOM_BAND_ZOOMED_IN_MAX_RATIO = 1.25;
 const ZOOM_BAND_MID_MAX_RATIO = 2.35;
 const FLAG_SIZE_TO_NODE_RATIO = 1.45;
 const FLAG_MIN_DRAW_SIZE = 10;
+const GRAPH_BUILD_BUDGET_MS = 16;
+const RENDERER_REFRESH_BUDGET_MS = 10;
 
 type ZoomBand = "zoomed-out" | "mid" | "zoomed-in";
 
@@ -342,9 +339,12 @@ export function NetworkView({
   const [atlasReady, setAtlasReady] = useState(false);
   const [framePressureLevel, setFramePressureLevel] = useState<FlagPressureLevel>("none");
   const [layoutRelaxToken, setLayoutRelaxToken] = useState(0);
+  const [rendererInitError, setRendererInitError] = useState<string | null>(null);
   const refreshFrameRef = useRef<number | null>(null);
+  const lastRendererRefreshMsRef = useRef(0);
   const previousPositionsRef = useRef<Map<string, Point>>(new Map());
   const appliedLayoutRelaxTokenRef = useRef(0);
+  const lastAppliedNetworkRequestIdRef = useRef(0);
   const anchoredAllianceIds = useFilterStore((state) => state.query.filters.anchoredAllianceIds);
   const setAnchoredAllianceIds = useFilterStore((state) => state.setAnchoredAllianceIds);
   const anchoredAllianceIdsRef = useRef<number[]>(anchoredAllianceIds);
@@ -441,7 +441,11 @@ export function NetworkView({
 
     refreshFrameRef.current = window.requestAnimationFrame(() => {
       refreshFrameRef.current = null;
+      const refreshStartedAt = performance.now();
       rendererRef.current?.refresh();
+      const refreshMs = performance.now() - refreshStartedAt;
+      lastRendererRefreshMsRef.current = refreshMs;
+      markTimelapsePerf("network.renderer.refresh", refreshMs);
     });
   }, []);
 
@@ -467,7 +471,7 @@ export function NetworkView({
     return allEvents[quantizedIndex]?.timestamp ?? playhead;
   }, [allEvents, baseQuery.playback.speed, isPlaying, playhead]);
 
-  const { workerEdgeEventIndexes, workerError } = useNetworkWorkerIndexes({
+  const { workerEdgeEventIndexes, workerLayout, workerRequestLifecycle, workerError } = useNetworkWorkerIndexes({
     baseQuery,
     playhead: networkSelectionPlayhead,
     maxEdges
@@ -575,21 +579,14 @@ export function NetworkView({
   const graph = useMemo(() => {
     const graphBuildStartedAt = performance.now();
     const nodeMetaById = new Map<string, { degree: number }>();
-    const adjacencyByNodeId = new Map<string, Set<string>>();
     const nodeCounterparties = new Map<
       string,
       Map<string, { counterpartyLabel: string; treatyTypes: Set<string> }>
     >();
 
-    const connectNodes = (leftId: string, rightId: string) => {
-      const leftNeighbors = adjacencyByNodeId.get(leftId) ?? new Set<string>();
-      leftNeighbors.add(rightId);
-      adjacencyByNodeId.set(leftId, leftNeighbors);
-
-      const rightNeighbors = adjacencyByNodeId.get(rightId) ?? new Set<string>();
-      rightNeighbors.add(leftId);
-      adjacencyByNodeId.set(rightId, rightNeighbors);
-    };
+    const workerNodeTargetsById = new Map(
+      (workerLayout?.nodeTargets ?? []).map((target) => [target.nodeId, target])
+    );
 
     const addCounterparty = (nodeId: string, otherId: string, otherLabel: string, treatyType: string) => {
       const counterparties =
@@ -612,8 +609,6 @@ export function NetworkView({
       const target = nodeMetaById.get(edge.targetId) ?? { degree: 0 };
       target.degree += 1;
       nodeMetaById.set(edge.targetId, target);
-
-      connectNodes(edge.sourceId, edge.targetId);
 
       addCounterparty(
         edge.sourceId,
@@ -693,22 +688,9 @@ export function NetworkView({
     const previousPositions = previousPositionsRef.current;
     const nextPositions = new Map(previousPositions);
     const applyRelaxLayout = layoutRelaxToken > appliedLayoutRelaxTokenRef.current;
-    const topologyStrength = Math.min(
-      1,
-      NETWORK_LAYOUT_TOPOLOGY_STRENGTH + (applyRelaxLayout ? NETWORK_LAYOUT_RELAX_TOPOLOGY_BOOST : 0)
-    );
-    const topologyMaxOffset =
-      NETWORK_LAYOUT_TOPOLOGY_MAX_OFFSET + (applyRelaxLayout ? NETWORK_LAYOUT_RELAX_MAX_OFFSET_BOOST : 0);
     const maxStepDisplacement = applyRelaxLayout
       ? NETWORK_LAYOUT_RELAX_MAX_STEP_DISPLACEMENT
       : NETWORK_LAYOUT_MAX_STEP_DISPLACEMENT;
-    const deterministicTargets = resolveLayoutTargets({
-      nodeIds,
-      adjacencyByNodeId,
-      strategy: NETWORK_LAYOUT_STRATEGY,
-      topologyStrength,
-      topologyMaxOffset
-    });
 
     let displacementSamples = 0;
     let displacementSum = 0;
@@ -716,7 +698,14 @@ export function NetworkView({
 
     const nodes: NodePayload[] = nodeIds.map((id) => {
       const meta = nodeMetaById.get(id)!;
-      const deterministicTarget = deterministicTargets.get(id)!;
+      const workerTarget = workerNodeTargetsById.get(id);
+      const candidateTarget = workerTarget
+        ? { x: workerTarget.targetX, y: workerTarget.targetY }
+        : positionForNode(id);
+      const deterministicTarget =
+        Number.isFinite(candidateTarget.x) && Number.isFinite(candidateTarget.y)
+          ? candidateTarget
+          : positionForNode(id);
       const previousPosition = previousPositions.get(id);
       const anchored = anchoredAllianceIdLookup.has(id);
       let pos: Point;
@@ -837,7 +826,7 @@ export function NetworkView({
       usedDayFallback: scoreResolution.usedFallback,
       scoreDay,
       graphBuildMs,
-      layoutStrategy: NETWORK_LAYOUT_STRATEGY,
+      layoutStrategy: "worker-connected",
       averageStepDisplacement: averageDisplacement,
       maxStepDisplacement: displacementMax,
       relaxAppliedToken: applyRelaxLayout ? layoutRelaxToken : 0
@@ -862,7 +851,8 @@ export function NetworkView({
     resolveAllianceFlagAtPlayhead,
     scoreSizeContrast,
     showFlags,
-    sizeByScore
+    sizeByScore,
+    workerLayout
   ]);
 
   useEffect(() => {
@@ -893,6 +883,17 @@ export function NetworkView({
     markTimelapsePerf("network.graph.build", graph.graphBuildMs);
     markTimelapsePerf("network.layout.displacement.avg", graph.averageStepDisplacement);
     markTimelapsePerf("network.layout.displacement.max", graph.maxStepDisplacement);
+    if (
+      import.meta.env.DEV &&
+      typeof window !== "undefined" &&
+      window.__timelapsePerf?.enabled &&
+      graph.graphBuildMs > GRAPH_BUILD_BUDGET_MS
+    ) {
+      console.error("[perf-gate] network.graph.build over budget", {
+        budgetMs: GRAPH_BUILD_BUDGET_MS,
+        actualMs: Number(graph.graphBuildMs.toFixed(2))
+      });
+    }
     pushNetworkFlagDiagnostic({
       stage: "graph-build",
       ts: Date.now(),
@@ -952,21 +953,30 @@ export function NetworkView({
       return;
     }
 
-    const graphModel = new Graph({ type: "directed", multi: true, allowSelfLoops: true });
-    const renderer = new Sigma(graphModel, hostRef.current, {
-      renderEdgeLabels: false,
-      labelRenderedSizeThreshold: 0,
-      labelColor: {
-        attribute: "default",
-        color: LABEL_TEXT_COLOR
-      },
-      minCameraRatio: 0.1,
-      maxCameraRatio: 8,
-      defaultNodeColor: "#0c8599",
-      defaultEdgeColor: EDGE_FALLBACK_COLOR,
-      enableEdgeEvents: true,
-      minEdgeThickness: 2.4
-    });
+    let graphModel: Graph;
+    let renderer: Sigma;
+    try {
+      graphModel = new Graph({ type: "directed", multi: true, allowSelfLoops: true });
+      renderer = new Sigma(graphModel, hostRef.current, {
+        renderEdgeLabels: false,
+        labelRenderedSizeThreshold: 0,
+        labelColor: {
+          attribute: "default",
+          color: LABEL_TEXT_COLOR
+        },
+        minCameraRatio: 0.1,
+        maxCameraRatio: 8,
+        defaultNodeColor: "#0c8599",
+        defaultEdgeColor: EDGE_FALLBACK_COLOR,
+        enableEdgeEvents: true,
+        minEdgeThickness: 2.4
+      });
+      setRendererInitError(null);
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "Unknown renderer initialization error";
+      setRendererInitError(`[network] Renderer failed to initialize: ${message}`);
+      return;
+    }
 
     const spriteLayer = renderer.createCanvas("flag-sprites", {
       beforeLayer: "mouse",
@@ -1178,8 +1188,9 @@ export function NetworkView({
       return;
     }
 
-    graphModel.clear();
+    const graphApplyStartedAt = performance.now();
 
+    const nextNodeAttributesById = new Map<string, Record<string, unknown>>();
     for (const node of graph.nodes) {
       const forceLabel = shouldForceNodeLabel(isFullscreen, forceFullscreenLabels, node.isPriorityNode);
       const displayLabel = displayLabelForBand(node.fullLabel, zoomBand, forceLabel);
@@ -1204,9 +1215,35 @@ export function NetworkView({
       if (graph.flagRenderMode !== "off" && node.flagSprite) {
         nodeAttributes.flagSprite = node.flagSprite;
       }
-      graphModel.addNode(node.id, nodeAttributes);
+      nextNodeAttributesById.set(node.id, nodeAttributes);
     }
 
+    for (const nodeId of [...graphModel.nodes()]) {
+      if (!nextNodeAttributesById.has(nodeId)) {
+        graphModel.dropNode(nodeId);
+      }
+    }
+
+    for (const [nodeId, nextAttributes] of nextNodeAttributesById.entries()) {
+      if (!graphModel.hasNode(nodeId)) {
+        graphModel.addNode(nodeId, nextAttributes);
+        continue;
+      }
+
+      const currentAttributes = graphModel.getNodeAttributes(nodeId) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(nextAttributes)) {
+        if (currentAttributes[key] !== value) {
+          graphModel.setNodeAttribute(nodeId, key, value);
+        }
+      }
+      for (const key of Object.keys(currentAttributes)) {
+        if (!(key in nextAttributes)) {
+          graphModel.removeNodeAttribute(nodeId, key);
+        }
+      }
+    }
+
+    const nextEdgeAttributesById = new Map<string, { source: string; target: string; attrs: Record<string, unknown> }>();
     for (const edge of graph.links) {
       if (!graphModel.hasNode(edge.source) || !graphModel.hasNode(edge.target)) {
         continue;
@@ -1216,22 +1253,81 @@ export function NetworkView({
         : edge.adjacentToFocusedAlliance
           ? FOCUSED_ADJACENT_EDGE_OPACITY
           : BASE_EDGE_OPACITY;
-      graphModel.addDirectedEdgeWithKey(edge.id, edge.source, edge.target, {
-        size: edge.highlighted ? 3.2 : edge.adjacentToFocusedAlliance ? 2 : 1.2,
-        color: colorWithOpacity(edge.color, edgeOpacity),
-        zIndex: edge.highlighted ? 3 : edge.adjacentToFocusedAlliance ? 2 : 1,
-        edgeKey: edge.edgeKey,
-        sourceLabel: edge.sourceLabel,
-        targetLabel: edge.targetLabel,
-        treatyType: edge.treatyType,
-        sourceType: edge.sourceType,
-        confidence: edge.confidence
+      nextEdgeAttributesById.set(edge.id, {
+        source: edge.source,
+        target: edge.target,
+        attrs: {
+          size: edge.highlighted ? 3.2 : edge.adjacentToFocusedAlliance ? 2 : 1.2,
+          color: colorWithOpacity(edge.color, edgeOpacity),
+          zIndex: edge.highlighted ? 3 : edge.adjacentToFocusedAlliance ? 2 : 1,
+          edgeKey: edge.edgeKey,
+          sourceLabel: edge.sourceLabel,
+          targetLabel: edge.targetLabel,
+          treatyType: edge.treatyType,
+          sourceType: edge.sourceType,
+          confidence: edge.confidence
+        }
       });
     }
 
+    for (const edgeId of [...graphModel.edges()]) {
+      if (!nextEdgeAttributesById.has(edgeId)) {
+        graphModel.dropEdge(edgeId);
+      }
+    }
+
+    for (const [edgeId, nextEdge] of nextEdgeAttributesById.entries()) {
+      if (!graphModel.hasEdge(edgeId)) {
+        graphModel.addDirectedEdgeWithKey(edgeId, nextEdge.source, nextEdge.target, nextEdge.attrs);
+        continue;
+      }
+
+      const source = graphModel.source(edgeId);
+      const target = graphModel.target(edgeId);
+      if (source !== nextEdge.source || target !== nextEdge.target) {
+        graphModel.dropEdge(edgeId);
+        graphModel.addDirectedEdgeWithKey(edgeId, nextEdge.source, nextEdge.target, nextEdge.attrs);
+        continue;
+      }
+
+      const currentAttributes = graphModel.getEdgeAttributes(edgeId) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(nextEdge.attrs)) {
+        if (currentAttributes[key] !== value) {
+          graphModel.setEdgeAttribute(edgeId, key, value);
+        }
+      }
+      for (const key of Object.keys(currentAttributes)) {
+        if (!(key in nextEdge.attrs)) {
+          graphModel.removeEdgeAttribute(edgeId, key);
+        }
+      }
+    }
+
+    markTimelapsePerf("network.graph.apply.diff", performance.now() - graphApplyStartedAt);
+
+    if (
+      workerRequestLifecycle &&
+      workerRequestLifecycle.requestId > lastAppliedNetworkRequestIdRef.current
+    ) {
+      const appliedAt = performance.now();
+      markTimelapsePerf("network.worker.applyLag", Math.max(0, appliedAt - workerRequestLifecycle.finishedAt));
+      markTimelapsePerf("network.worker.endToEnd", Math.max(0, appliedAt - workerRequestLifecycle.requestedAt));
+      lastAppliedNetworkRequestIdRef.current = workerRequestLifecycle.requestId;
+    }
+
     scheduleRendererRefresh();
-    const refreshMs = flagDrawMsRef.current;
-    markTimelapsePerf("network.renderer.refresh", refreshMs);
+    const refreshMs = Math.max(flagDrawMsRef.current, lastRendererRefreshMsRef.current);
+    if (
+      import.meta.env.DEV &&
+      typeof window !== "undefined" &&
+      window.__timelapsePerf?.enabled &&
+      refreshMs > RENDERER_REFRESH_BUDGET_MS
+    ) {
+      console.error("[perf-gate] network.renderer.refresh over budget", {
+        budgetMs: RENDERER_REFRESH_BUDGET_MS,
+        actualMs: Number(refreshMs.toFixed(2))
+      });
+    }
 
     const overBudget = refreshMs > FLAG_PRESSURE_REFRESH_MS || graph.graphBuildMs > FLAG_PRESSURE_BUILD_MS;
     framePressureScoreRef.current += overBudget ? 1 : -1;
@@ -1265,6 +1361,7 @@ export function NetworkView({
     graph.nodes,
     isFullscreen,
     scheduleRendererRefresh,
+    workerRequestLifecycle,
     zoomBand
   ]);
 
@@ -1342,6 +1439,9 @@ export function NetworkView({
       />
       {!isFullscreen && workerError ? (
         <div className="mb-2 rounded border border-rose-200 bg-rose-50 px-2 py-2 text-[11px] text-rose-900">{workerError}</div>
+      ) : null}
+      {!isFullscreen && rendererInitError ? (
+        <div className="mb-2 rounded border border-rose-200 bg-rose-50 px-2 py-2 text-[11px] text-rose-900">{rendererInitError}</div>
       ) : null}
       <div
         ref={hostRef}

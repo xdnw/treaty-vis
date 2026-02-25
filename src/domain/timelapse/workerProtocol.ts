@@ -9,6 +9,39 @@ export type WorkerPulsePoint = {
   inferred: number;
 };
 
+export type WorkerComponentTarget = {
+  componentId: string;
+  nodeIds: string[];
+  anchorX: number;
+  anchorY: number;
+};
+
+export type WorkerCommunityTarget = {
+  communityId: string;
+  componentId: string;
+  nodeIds: string[];
+  anchorX: number;
+  anchorY: number;
+};
+
+export type WorkerNodeTarget = {
+  nodeId: string;
+  componentId: string;
+  communityId: string;
+  targetX: number;
+  targetY: number;
+  neighborX: number;
+  neighborY: number;
+  anchorX: number;
+  anchorY: number;
+};
+
+export type WorkerNetworkLayout = {
+  components: WorkerComponentTarget[];
+  communities: WorkerCommunityTarget[];
+  nodeTargets: WorkerNodeTarget[];
+};
+
 export type WorkerQueryState = {
   time: {
     start: string | null;
@@ -133,8 +166,11 @@ export type LoaderWorkerResponse =
       kind: "network";
       ok: true;
       requestId: number;
+      startedAt: number;
+      finishedAt: number;
       edgeIndexesBuffer: ArrayBuffer;
       length: number;
+      layout: WorkerNetworkLayout;
     }
   | {
       kind: "network";

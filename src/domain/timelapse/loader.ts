@@ -21,6 +21,7 @@ import type { QueryState } from "@/features/filters/filterStore";
 import type {
   LoaderWorkerRequest,
   LoaderWorkerResponse,
+  WorkerNetworkLayout,
   WorkerPulsePoint,
   WorkerQueryState
 } from "@/domain/timelapse/workerProtocol";
@@ -66,8 +67,15 @@ type PendingPulseRequest = {
 };
 
 type PendingNetworkRequest = {
-  resolve: (value: Uint32Array) => void;
+  resolve: (value: TimelapseNetworkSelection) => void;
   reject: (error: Error) => void;
+};
+
+export type TimelapseNetworkSelection = {
+  edgeEventIndexes: Uint32Array;
+  layout: WorkerNetworkLayout;
+  startedAt: number;
+  finishedAt: number;
 };
 
 type TimelapseLoadMode = "flags-on" | "flags-off";
@@ -278,7 +286,12 @@ function createWorker(): Worker {
         return;
       }
 
-      pending.resolve(new Uint32Array(response.edgeIndexesBuffer, 0, response.length));
+      pending.resolve({
+        edgeEventIndexes: new Uint32Array(response.edgeIndexesBuffer, 0, response.length),
+        layout: response.layout,
+        startedAt: response.startedAt,
+        finishedAt: response.finishedAt
+      });
       return;
     }
 
@@ -491,7 +504,7 @@ export async function selectTimelapseNetworkEventIndexes(
   query: QueryState,
   playhead: string | null,
   maxEdges: number
-): Promise<Uint32Array> {
+): Promise<TimelapseNetworkSelection> {
   if (typeof Worker === "undefined") {
     throw new Error("Timelapse network worker is unavailable in this environment.");
   }
@@ -505,9 +518,10 @@ export async function selectTimelapseNetworkEventIndexes(
   }
   const worker = workerInstance;
 
-  return new Promise<Uint32Array>((resolve, reject) => {
+  return new Promise<TimelapseNetworkSelection>((resolve, reject) => {
     networkRequestId += 1;
     const requestId = networkRequestId;
+
     pendingNetworkRequests.set(requestId, { resolve, reject });
 
     const request: LoaderWorkerRequest = {

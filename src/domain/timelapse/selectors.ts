@@ -3,14 +3,9 @@ import {
   buildPulseSeries as buildSharedPulseSeries,
   buildQuerySelectionKey,
   buildTopXMembershipLookup,
-  compareEventChronology,
-  computeSelectionIndexes,
-  keyForEvent,
-  selectStableCappedActiveEvents
+  computeSelectionIndexes
 } from "@/domain/timelapse/queryEngine";
 import type { QueryState } from "@/features/filters/filterStore";
-
-const TERMINAL_ACTIONS = new Set(["cancelled", "expired", "ended", "terminated", "termination", "inferred_cancelled"]);
 
 export type TimelapseIndices = {
   allEventIndexes: number[];
@@ -39,18 +34,6 @@ export type SelectionResult = {
   events: TimelapseEvent[];
 };
 
-export type NetworkEdge = {
-  key: string;
-  eventId: string;
-  sourceId: string;
-  targetId: string;
-  sourceLabel: string;
-  targetLabel: string;
-  treatyType: string;
-  sourceType: string;
-  confidence: string;
-};
-
 export type PulsePoint = {
   day: string;
   signed: number;
@@ -64,7 +47,6 @@ type SelectorCacheEntry = {
 };
 
 const selectorCache = new Map<string, SelectorCacheEntry>();
-const networkOrderCache = new WeakMap<number[], number[]>();
 
 function addToRecordList(record: Record<string, number[]>, key: string, index: number): void {
   if (!record[key]) {
@@ -182,52 +164,6 @@ export function selectEvents(derived: TimelapseDerivedData, query: QueryState): 
   }
 
   return result;
-}
-
-export function deriveNetworkEdges(
-  events: TimelapseEvent[],
-  indexes: number[],
-  playhead: string | null,
-  maxEdges: number
-): NetworkEdge[] {
-  const active = new Map<string, TimelapseEvent>();
-  let chronologicallyOrderedIndexes = networkOrderCache.get(indexes);
-  if (!chronologicallyOrderedIndexes) {
-    chronologicallyOrderedIndexes = [...indexes].sort((leftIndex, rightIndex) =>
-      compareEventChronology(events[leftIndex], events[rightIndex])
-    );
-    networkOrderCache.set(indexes, chronologicallyOrderedIndexes);
-  }
-
-  for (const index of chronologicallyOrderedIndexes) {
-    const event = events[index];
-    if (playhead && event.timestamp > playhead) {
-      break;
-    }
-    const key = keyForEvent(event);
-    if (event.action === "signed") {
-      active.delete(key);
-      active.set(key, event);
-    } else if (TERMINAL_ACTIONS.has(event.action)) {
-      active.delete(key);
-    }
-  }
-
-  const activeEvents = [...active.values()];
-  const keepCount = Math.max(maxEdges, 200);
-  const reduced = selectStableCappedActiveEvents(activeEvents, keepCount);
-
-  return reduced.map((event) => ({
-    key: keyForEvent(event),
-    eventId: event.event_id,
-    sourceId: String(event.from_alliance_id),
-    targetId: String(event.to_alliance_id),
-    sourceLabel: event.from_alliance_name || String(event.from_alliance_id),
-    targetLabel: event.to_alliance_name || String(event.to_alliance_id),
-    treatyType: event.treaty_type,
-    sourceType: event.source || "unknown",
-    confidence: event.confidence
-  }));
 }
 
 export function buildPulseSeries(

@@ -80,13 +80,16 @@ To run against local files only, pass `--skip-alliance-download --alliances-dir 
 - Dev-only perf diagnostics: run `npm run dev` and use `?perf=1` (or `VITE_TIMELAPSE_PERF=true`).
 - Production builds must not depend on perf globals or dev-only instrumentation.
 - Additional guardrails: `docs/performance-budget.md`.
+- Key network metrics to track: `network.worker.turnaround`, `network.graph.build`, `network.graph.apply.diff`, `network.renderer.refresh`.
 
 ## Network Layout
 
-- Default layout is deterministic and topology-biased.
-- Non-anchored nodes are damped and displacement-capped each tick to reduce temporal churn.
-- `Re-pack / Relax` applies a stronger one-shot local relaxation pass.
-- Policy constants live in `src/features/network/networkViewPolicy.ts`.
+- Canonical layout is worker-driven and deterministic: connected components, bounded communities, and per-node targets.
+- Worker output is the single source of truth for component/community/node targets used by the UI apply path.
+- UI applies damping and displacement clamps (`6` default, `12` during one-shot relax) to reduce churn across neighboring playheads.
+- Graph updates use incremental node/edge diffs instead of full clear-and-rebuild to avoid playback freezes.
+- `Re-pack / Relax` remains a bounded one-shot refinement over canonical worker targets.
+- Policy caps live in `src/features/network/networkViewPolicy.ts`.
 
 ## Data Files Expected
 
