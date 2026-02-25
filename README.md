@@ -7,7 +7,7 @@ Frontend viewer for reconciled treaty timelapse data.
 - React + TypeScript + Vite
 - Tailwind CSS
 - ECharts (timeline)
-- Cytoscape.js (network)
+- Sigma.js + Graphology (network)
 - Zustand (state)
 - Zod (schema validation)
 
@@ -51,16 +51,10 @@ npm run dev
 npm run build
 ```
 
-## Performance Baseline
+## Diagnostics
 
-- Budgets and baseline procedure: `docs/performance-budget.md`.
-- Runtime profiling can be enabled with `?perf=1` (or `VITE_TIMELAPSE_PERF=true`).
-- Open browser devtools console and run:
-
-```js
-window.__timelapsePerf?.reset();
-window.__timelapsePerf?.report();
-```
+- Dev-only diagnostics can be enabled with `?perf=1` (or `VITE_TIMELAPSE_PERF=true`) while running `npm run dev`.
+- Production builds do not expose runtime perf globals.
 
 ## Data files expected
 

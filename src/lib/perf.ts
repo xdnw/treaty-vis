@@ -42,10 +42,18 @@ type PerfWindow = Window & {
   __timelapsePerf?: PerfCollector;
 };
 
+const DEV_PERF_ENABLED = import.meta.env.DEV;
 const stats = new Map<string, PerfStats>();
+const noopCollector: PerfCollector = {
+  enabled: false,
+  mark: () => {},
+  reset: () => {},
+  report: () => ({}),
+  scoreLoads: []
+};
 
 function isPerfEnabled(): boolean {
-  if (typeof window === "undefined") {
+  if (!DEV_PERF_ENABLED || typeof window === "undefined") {
     return false;
   }
 
@@ -97,14 +105,8 @@ function buildCollector(): PerfCollector {
 }
 
 export function initTimelapsePerfCollector(): PerfCollector {
-  if (typeof window === "undefined") {
-    return {
-      enabled: false,
-      mark: () => {},
-      reset: () => {},
-      report: () => ({}),
-      scoreLoads: []
-    };
+  if (!DEV_PERF_ENABLED || typeof window === "undefined") {
+    return noopCollector;
   }
 
   const perfWindow = window as PerfWindow;
@@ -120,7 +122,7 @@ export function markTimelapsePerf(name: string, durationMs: number): void {
 }
 
 export function pushScoreLoadAttempt(attempt: Omit<ScoreLoadAttemptTelemetry, "at">): void {
-  if (typeof window === "undefined") {
+  if (!DEV_PERF_ENABLED || typeof window === "undefined") {
     return;
   }
 

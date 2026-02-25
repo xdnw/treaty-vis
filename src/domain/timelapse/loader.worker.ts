@@ -280,7 +280,7 @@ async function loadOptionalFlagPayload(): Promise<Pick<LoaderWorkerPayload, "all
     fetch("/data/flags.msgpack")
       .then(async (response) => {
         if (!response.ok) {
-          console.warn("Optional flags.msgpack fetch failed in worker", response.status);
+          console.warn("[timelapse] Optional flags.msgpack fetch failed in worker", response.status);
           return null;
         }
         const body = await response.arrayBuffer();
@@ -290,7 +290,7 @@ async function loadOptionalFlagPayload(): Promise<Pick<LoaderWorkerPayload, "all
     fetch("/data/flag_assets.msgpack")
       .then(async (response) => {
         if (!response.ok) {
-          console.warn("Optional flag_assets.msgpack fetch failed in worker", response.status);
+          console.warn("[timelapse] Optional flag_assets.msgpack fetch failed in worker", response.status);
           return null;
         }
         const body = await response.arrayBuffer();
@@ -850,6 +850,20 @@ function payloadForMode(
   };
 }
 
+function sendWorkerFailure(
+  response:
+    | { kind: "load"; ok: false; error: string }
+    | { kind: "select"; ok: false; requestId: number; error: string }
+    | { kind: "pulse"; ok: false; requestId: number; error: string }
+    | { kind: "network"; ok: false; requestId: number; error: string }
+): void {
+  workerScope.postMessage(response);
+}
+
+function toWorkerError(reason: unknown, fallbackMessage: string): string {
+  return reason instanceof Error && reason.message ? reason.message : fallbackMessage;
+}
+
 workerScope.addEventListener("message", async (event: MessageEvent<LoaderWorkerRequest>) => {
   const request = event.data;
 
@@ -863,12 +877,11 @@ workerScope.addEventListener("message", async (event: MessageEvent<LoaderWorkerR
       };
       workerScope.postMessage(response);
     } catch (reason) {
-      const response: LoaderWorkerResponse = {
+      sendWorkerFailure({
         kind: "load",
         ok: false,
-        error: reason instanceof Error ? reason.message : "Unknown loader worker error"
-      };
-      workerScope.postMessage(response);
+        error: toWorkerError(reason, "Unknown loader worker error")
+      });
     }
     return;
   }
@@ -887,13 +900,12 @@ workerScope.addEventListener("message", async (event: MessageEvent<LoaderWorkerR
       };
       workerScope.postMessage(response, [indexesBuffer]);
     } catch (reason) {
-      const response: LoaderWorkerResponse = {
+      sendWorkerFailure({
         kind: "select",
         ok: false,
         requestId: request.requestId,
-        error: reason instanceof Error ? reason.message : "Unknown selection worker error"
-      };
-      workerScope.postMessage(response);
+        error: toWorkerError(reason, "Unknown selection worker error")
+      });
     }
     return;
   }
@@ -912,13 +924,12 @@ workerScope.addEventListener("message", async (event: MessageEvent<LoaderWorkerR
       };
       workerScope.postMessage(response, [edgeIndexesBuffer]);
     } catch (reason) {
-      const response: LoaderWorkerResponse = {
+      sendWorkerFailure({
         kind: "network",
         ok: false,
         requestId: request.requestId,
-        error: reason instanceof Error ? reason.message : "Unknown network worker error"
-      };
-      workerScope.postMessage(response);
+        error: toWorkerError(reason, "Unknown network worker error")
+      });
     }
     return;
   }
@@ -951,12 +962,11 @@ workerScope.addEventListener("message", async (event: MessageEvent<LoaderWorkerR
     };
     workerScope.postMessage(response, [response.signedBuffer, response.terminalBuffer, response.inferredBuffer]);
   } catch (reason) {
-    const response: LoaderWorkerResponse = {
+    sendWorkerFailure({
       kind: "pulse",
       ok: false,
       requestId: request.requestId,
-      error: reason instanceof Error ? reason.message : "Unknown pulse worker error"
-    };
-    workerScope.postMessage(response);
+      error: toWorkerError(reason, "Unknown pulse worker error")
+    });
   }
 });

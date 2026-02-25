@@ -239,64 +239,6 @@ async function fetchMsgpack<T>(url: string): Promise<T> {
   return decode(new Uint8Array(body)) as T;
 }
 
-async function loadTimelapsePayloadOnMainThread(showFlags: boolean): Promise<RawTimelapsePayload> {
-  const [eventsRaw, summaryRaw, flagsRaw, allianceFlagsRaw, flagAssetsRaw, scoreRanksRaw, manifestRaw] = await Promise.all([
-    fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled.msgpack"),
-    fetchMsgpack<unknown>("/data/treaty_changes_reconciled_summary.msgpack"),
-    fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled_flags.msgpack"),
-    showFlags
-      ? fetch("/data/flags.msgpack")
-          .then(async (response) => {
-            if (!response.ok) {
-              return null;
-            }
-            const body = await response.arrayBuffer();
-            return decode(new Uint8Array(body)) as unknown;
-          })
-          .catch(() => null)
-      : Promise.resolve(null),
-    showFlags
-      ? fetch("/data/flag_assets.msgpack")
-          .then(async (response) => {
-            if (!response.ok) {
-              return null;
-            }
-            const body = await response.arrayBuffer();
-            return decode(new Uint8Array(body)) as unknown;
-          })
-          .catch(() => null)
-      : Promise.resolve(null),
-    fetch("/data/alliance_score_ranks_daily.msgpack")
-      .then(async (response) => {
-        if (!response.ok) {
-          return null;
-        }
-        const body = await response.arrayBuffer();
-        return decode(new Uint8Array(body)) as unknown;
-      })
-      .catch(() => null),
-    fetch("/data/manifest.json")
-      .then(async (response) => {
-        if (!response.ok) {
-          return null;
-        }
-        return (await response.json()) as unknown;
-      })
-      .catch(() => null)
-  ]);
-
-  return {
-    eventsRaw,
-    indicesRaw: null,
-    summaryRaw,
-    flagsRaw,
-    allianceFlagsRaw,
-    flagAssetsRaw,
-    scoreRanksRaw,
-    manifestRaw
-  };
-}
-
 function createWorker(): Worker {
   if (workerInstance) {
     return workerInstance;
@@ -428,11 +370,11 @@ function toWorkerQueryState(query: QueryState): WorkerQueryState {
 
 async function loadTimelapsePayloadInWorker(showFlags: boolean): Promise<RawTimelapsePayload> {
   if (typeof Worker === "undefined") {
-    return loadTimelapsePayloadOnMainThread(showFlags);
+    throw new Error("Timelapse loader worker is unavailable in this environment.");
   }
 
   if (workerLoadError) {
-    return loadTimelapsePayloadOnMainThread(showFlags);
+    throw workerLoadError;
   }
 
   if (!showFlags && workerBaseLoadPromise) {
@@ -444,32 +386,32 @@ async function loadTimelapsePayloadInWorker(showFlags: boolean): Promise<RawTime
   }
 
   const nextPromise = new Promise<RawTimelapsePayload>((resolve, reject) => {
-      const worker = createWorker();
+    const worker = createWorker();
 
-      const onMessage = (event: MessageEvent<LoaderWorkerResponse>) => {
-        const response = event.data;
-        if (response.kind !== "load") {
-          return;
-        }
-        worker.removeEventListener("message", onMessage);
-        if (response.ok) {
-          resolve(response.payload);
-          return;
-        }
-        reject(new Error(response.error));
-      };
+    const onMessage = (event: MessageEvent<LoaderWorkerResponse>) => {
+      const response = event.data;
+      if (response.kind !== "load") {
+        return;
+      }
+      worker.removeEventListener("message", onMessage);
+      if (response.ok) {
+        resolve(response.payload);
+        return;
+      }
+      reject(new Error(response.error));
+    };
 
-      worker.addEventListener("message", onMessage);
-      const request: LoaderWorkerRequest = { kind: "load", includeFlags: showFlags };
-      worker.postMessage(request);
-    }).catch((error) => {
+    worker.addEventListener("message", onMessage);
+    const request: LoaderWorkerRequest = { kind: "load", includeFlags: showFlags };
+    worker.postMessage(request);
+  }).catch((error) => {
       if (showFlags) {
         workerFlagsLoadPromise = null;
       } else {
         workerBaseLoadPromise = null;
       }
       workerLoadError = error instanceof Error ? error : new Error("Loader worker failed");
-      return loadTimelapsePayloadOnMainThread(showFlags);
+      throw workerLoadError;
     });
 
   if (showFlags) {
@@ -480,14 +422,17 @@ async function loadTimelapsePayloadInWorker(showFlags: boolean): Promise<RawTime
   return nextPromise;
 }
 
-export async function selectTimelapseIndexes(query: QueryState): Promise<Uint32Array | null> {
-  if (typeof Worker === "undefined" || workerLoadError) {
-    return null;
+export async function selectTimelapseIndexes(query: QueryState): Promise<Uint32Array> {
+  if (typeof Worker === "undefined") {
+    throw new Error("Timelapse selection worker is unavailable in this environment.");
+  }
+  if (workerLoadError) {
+    throw workerLoadError;
   }
 
   await loadTimelapsePayloadInWorker(query.filters.showFlags);
   if (!workerInstance || workerLoadError) {
-    return null;
+    throw workerLoadError ?? new Error("Timelapse selection worker failed to initialize.");
   }
   const worker = workerInstance;
 
@@ -502,21 +447,24 @@ export async function selectTimelapseIndexes(query: QueryState): Promise<Uint32A
       query: toWorkerQueryState(query)
     };
     worker.postMessage(request);
-  }).catch(() => null);
+  });
 }
 
 export async function selectTimelapsePulse(
   query: QueryState,
   maxPoints: number,
   playhead: string | null
-): Promise<WorkerPulsePoint[] | null> {
-  if (typeof Worker === "undefined" || workerLoadError) {
-    return null;
+): Promise<WorkerPulsePoint[]> {
+  if (typeof Worker === "undefined") {
+    throw new Error("Timelapse pulse worker is unavailable in this environment.");
+  }
+  if (workerLoadError) {
+    throw workerLoadError;
   }
 
   await loadTimelapsePayloadInWorker(query.filters.showFlags);
   if (!workerInstance || workerLoadError) {
-    return null;
+    throw workerLoadError ?? new Error("Timelapse pulse worker failed to initialize.");
   }
   const worker = workerInstance;
 
@@ -533,21 +481,24 @@ export async function selectTimelapsePulse(
       playhead
     };
     worker.postMessage(request);
-  }).catch(() => null);
+  });
 }
 
 export async function selectTimelapseNetworkEventIndexes(
   query: QueryState,
   playhead: string | null,
   maxEdges: number
-): Promise<Uint32Array | null> {
-  if (typeof Worker === "undefined" || workerLoadError) {
-    return null;
+): Promise<Uint32Array> {
+  if (typeof Worker === "undefined") {
+    throw new Error("Timelapse network worker is unavailable in this environment.");
+  }
+  if (workerLoadError) {
+    throw workerLoadError;
   }
 
   await loadTimelapsePayloadInWorker(query.filters.showFlags);
   if (!workerInstance || workerLoadError) {
-    return null;
+    throw workerLoadError ?? new Error("Timelapse network worker failed to initialize.");
   }
   const worker = workerInstance;
 
@@ -564,7 +515,7 @@ export async function selectTimelapseNetworkEventIndexes(
       maxEdges
     };
     worker.postMessage(request);
-  }).catch(() => null);
+  });
 }
 
 type CachedBundle = {
@@ -602,29 +553,29 @@ function parseOptionalFlagArtifacts(
   }
 
   if (allianceFlagsRaw === null) {
-    console.warn("Optional flags.msgpack dataset is unavailable; alliance flag timelines will be disabled.");
+    console.warn("[timelapse] Optional flags.msgpack unavailable; alliance flag timelines disabled.");
   }
   if (flagAssetsRaw === null) {
-    console.warn("Optional flag_assets.msgpack dataset is unavailable; network flag sprites will be disabled.");
+    console.warn("[timelapse] Optional flag_assets.msgpack unavailable; network flag sprites disabled.");
   }
 
   const parsedAllianceFlags = allianceFlagsRaw ? allianceFlagsPayloadSchema.safeParse(allianceFlagsRaw) : null;
   const allianceFlagsPayload = parsedAllianceFlags?.success ? parsedAllianceFlags.data : null;
   if (allianceFlagsRaw && parsedAllianceFlags && !parsedAllianceFlags.success) {
-    console.warn("Ignoring invalid optional alliance flags dataset", parsedAllianceFlags.error.message);
+    console.error("[timelapse] Invalid optional alliance flags dataset", parsedAllianceFlags.error.message);
   }
 
   const parsedFlagAssets = flagAssetsRaw ? flagAssetsPayloadSchema.safeParse(flagAssetsRaw) : null;
   const flagAssetsPayload = parsedFlagAssets?.success ? parsedFlagAssets.data : null;
   if (flagAssetsRaw && parsedFlagAssets && !parsedFlagAssets.success) {
-    console.warn("Ignoring invalid optional flag assets dataset", parsedFlagAssets.error.message);
+    console.error("[timelapse] Invalid optional flag assets dataset", parsedFlagAssets.error.message);
   }
 
   if (allianceFlagsPayload && flagAssetsPayload === null) {
-    console.warn("Alliance flag timeline data loaded without valid atlas assets; sprite rendering will degrade gracefully.");
+    console.warn("[timelapse] Flag timelines loaded without atlas assets; sprite rendering degraded.");
   }
   if (flagAssetsPayload && allianceFlagsPayload === null) {
-    console.warn("Flag atlas assets loaded without alliance timeline data; no alliance flag sprites will resolve.");
+    console.warn("[timelapse] Flag atlas loaded without timelines; no alliance flag sprites will resolve.");
   }
 
   return {
@@ -647,7 +598,7 @@ function validateOptionalFlagManifestEntries(manifest: TimelapseManifest | null,
 
   optionalFlagManifestWarningShown = true;
   console.warn(
-    `Manifest is missing optional flag artifacts (${missing.join(", ")}) ; flag overlays will fall back without sprite assets.`
+    `[timelapse] Manifest missing optional flag artifacts (${missing.join(", ")}); overlays will use fallback behavior.`
   );
 }
 
@@ -814,7 +765,7 @@ async function loadTimelapseBundleImpl(showFlags: boolean): Promise<TimelapseDat
   const parsedRanks = scoreRanksRaw ? allianceScoreRanksDailySchema.safeParse(scoreRanksRaw) : null;
   const allianceScoreRanksByDay = parsedRanks?.success ? parsedRanks.data.ranks_by_day : null;
   if (scoreRanksRaw && parsedRanks && !parsedRanks.success) {
-    console.warn("Ignoring invalid optional alliance score-rank dataset", parsedRanks.error.message);
+    console.error("[timelapse] Invalid optional alliance score-rank dataset", parsedRanks.error.message);
   }
 
   const bundle: TimelapseDataBundle = {

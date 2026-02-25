@@ -3,9 +3,7 @@ import Graph from "graphology";
 import Sigma from "sigma";
 import type { ScoreLoaderSnapshot } from "@/domain/timelapse/scoreLoader";
 import type { AllianceFlagSnapshot, AllianceScoresByDay, FlagAssetsPayload, TimelapseEvent } from "@/domain/timelapse/schema";
-import { selectTimelapseNetworkEventIndexes } from "@/domain/timelapse/loader";
 import { resolveScoreRowForPlayhead } from "@/domain/timelapse/scoreDay";
-import { deriveNetworkEdges } from "@/domain/timelapse/selectors";
 import { NODE_MAX_RADIUS_DEFAULT, type QueryState, useFilterStore } from "@/features/filters/filterStore";
 import { dampPosition, positionForNode, type Point } from "@/features/network/layout";
 import {
@@ -25,28 +23,12 @@ import {
   shouldForceNodeLabel
 } from "@/features/network/networkViewPolicy";
 import { NetworkAllianceHint, type NetworkAllianceHintData } from "@/features/network/NetworkAllianceHint";
+import { NetworkViewPanel } from "@/features/network/NetworkViewPanel";
+import { EDGE_FALLBACK_COLOR, TREATY_TYPE_STYLES } from "@/features/network/networkViewLegend";
+import { useNetworkWorkerIndexes } from "@/features/network/useNetworkWorkerIndexes";
 import { markTimelapsePerf } from "@/lib/perf";
 
-type TreatyTypeStyle = {
-  label: string;
-  color: string;
-};
-
-const TREATY_TYPE_STYLES: Record<string, TreatyTypeStyle> = {
-  EXTENSION: { label: "Extension", color: "#7c3aed" },
-  MDOAP: { label: "MDOAP", color: "#0f766e" },
-  MDP: { label: "MDP", color: "#0b7285" },
-  NAP: { label: "NAP", color: "#2b8a3e" },
-  NPT: { label: "NPT", color: "#1d4ed8" },
-  ODOAP: { label: "ODOAP", color: "#9a3412" },
-  ODP: { label: "ODP", color: "#5f3dc4" },
-  OFFSHORE: { label: "Offshore", color: "#475569" },
-  PIAT: { label: "PIAT", color: "#364fc7" },
-  PROTECTORATE: { label: "Protectorate", color: "#d9480f" }
-};
-
 const LABEL_TEXT_COLOR = "#1f2937";
-const EDGE_FALLBACK_COLOR = "#4b5563";
 const BASE_EDGE_OPACITY = 0.62;
 const FOCUSED_ADJACENT_EDGE_OPACITY = 0.84;
 const HIGHLIGHTED_EDGE_OPACITY = 0.95;
@@ -73,7 +55,7 @@ type NetworkFlagDiagnosticSample = {
 };
 
 function pushNetworkFlagDiagnostic(sample: NetworkFlagDiagnosticSample): void {
-  if (typeof window === "undefined") {
+  if (!import.meta.env.DEV || typeof window === "undefined") {
     return;
   }
 
@@ -96,24 +78,6 @@ function pushNetworkFlagDiagnostic(sample: NetworkFlagDiagnosticSample): void {
 
 type ZoomBand = "zoomed-out" | "mid" | "zoomed-in";
 
-type EdgeLegendItem = {
-  key: string;
-  label: string;
-  color: string;
-};
-
-const EDGE_LEGEND_ITEMS: EdgeLegendItem[] = [
-  ...Object.entries(TREATY_TYPE_STYLES).map(([key, style]) => ({
-    key,
-    color: style.color,
-    label: style.label
-  })),
-  {
-    key: "unknown",
-    label: "Unknown / other",
-    color: EDGE_FALLBACK_COLOR
-  }
-];
 
 type Props = {
   allEvents: TimelapseEvent[];
@@ -485,8 +449,6 @@ export function NetworkView({
   const [cameraRatio, setCameraRatio] = useState(1);
   const [atlasReady, setAtlasReady] = useState(false);
   const [framePressureLevel, setFramePressureLevel] = useState<FlagPressureLevel>("none");
-  const [workerEdgeEventIndexes, setWorkerEdgeEventIndexes] = useState<number[] | null>(null);
-  const networkRequestRef = useRef(0);
   const refreshFrameRef = useRef<number | null>(null);
   const previousPositionsRef = useRef<Map<string, Point>>(new Map());
   const anchoredAllianceIds = useFilterStore((state) => state.query.filters.anchoredAllianceIds);
@@ -611,20 +573,11 @@ export function NetworkView({
     return allEvents[quantizedIndex]?.timestamp ?? playhead;
   }, [allEvents, baseQuery.playback.speed, isPlaying, playhead]);
 
-  useEffect(() => {
-    networkRequestRef.current += 1;
-    const requestId = networkRequestRef.current;
-    setWorkerEdgeEventIndexes(null);
-
-    void selectTimelapseNetworkEventIndexes(baseQuery, networkSelectionPlayhead, maxEdges).then((workerIndexes) => {
-      if (networkRequestRef.current !== requestId) {
-        return;
-      }
-      if (workerIndexes) {
-        setWorkerEdgeEventIndexes(Array.from(workerIndexes));
-      }
-    });
-  }, [baseQuery, maxEdges, networkSelectionPlayhead]);
+  const { workerEdgeEventIndexes, workerError } = useNetworkWorkerIndexes({
+    baseQuery,
+    playhead: networkSelectionPlayhead,
+    maxEdges
+  });
 
   const allianceNameById = useMemo(() => {
     const latestNameById = new Map<string, string>();
@@ -667,30 +620,27 @@ export function NetworkView({
   }, [allEvents, playhead]);
 
   const edges = useMemo(() => {
-    const rawEdges =
-      workerEdgeEventIndexes !== null
-        ? workerEdgeEventIndexes.map((eventIndex) => {
-            const event = allEvents[eventIndex];
-            return {
-              key: `${event.pair_min_id}:${event.pair_max_id}:${event.treaty_type}`,
-              eventId: event.event_id,
-              sourceId: String(event.from_alliance_id),
-              targetId: String(event.to_alliance_id),
-              sourceLabel: event.from_alliance_name || String(event.from_alliance_id),
-              targetLabel: event.to_alliance_name || String(event.to_alliance_id),
-              treatyType: event.treaty_type,
-              sourceType: event.source || "unknown",
-              confidence: event.confidence
-            };
-          })
-        : deriveNetworkEdges(allEvents, scopedIndexes, playhead, maxEdges);
+    const rawEdges = (workerEdgeEventIndexes ?? []).map((eventIndex) => {
+      const event = allEvents[eventIndex];
+      return {
+        key: `${event.pair_min_id}:${event.pair_max_id}:${event.treaty_type}`,
+        eventId: event.event_id,
+        sourceId: String(event.from_alliance_id),
+        targetId: String(event.to_alliance_id),
+        sourceLabel: event.from_alliance_name || String(event.from_alliance_id),
+        targetLabel: event.to_alliance_name || String(event.to_alliance_id),
+        treatyType: event.treaty_type,
+        sourceType: event.source || "unknown",
+        confidence: event.confidence
+      };
+    });
 
     return rawEdges.map((edge) => ({
       ...edge,
       sourceLabel: allianceNameById.get(edge.sourceId) ?? edge.sourceLabel,
       targetLabel: allianceNameById.get(edge.targetId) ?? edge.targetLabel
     }));
-  }, [allEvents, allianceNameById, maxEdges, playhead, scopedIndexes, workerEdgeEventIndexes]);
+  }, [allEvents, allianceNameById, workerEdgeEventIndexes]);
 
   const hoverResetKey = useMemo(() => {
     return buildHoverResetKey(baseQuery, {
@@ -1415,94 +1365,21 @@ export function NetworkView({
 
   return (
     <section className={isFullscreen ? "panel relative h-full w-full rounded-xl p-2 md:p-3" : "panel p-4"}>
-      {isFullscreen ? (
-        <button
-          type="button"
-          className="absolute right-3 top-3 z-10 rounded border border-slate-300 bg-white/95 px-2 py-1 text-xs hover:bg-slate-100"
-          onClick={onExitFullscreen}
-        >
-          Exit Fullscreen
-        </button>
-      ) : (
-        <header className="mb-2 flex items-center justify-between">
-          <h2 className="text-lg">Network Explorer</h2>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted">
-              {graph.renderedEdges} edges / {graph.budgetLabel} LOD budget
-            </span>
-            <button
-              type="button"
-              className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100"
-              onClick={onEnterFullscreen}
-            >
-              Fullscreen
-            </button>
-          </div>
-        </header>
-      )}
-      {!isFullscreen ? <div className="mb-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-          <label htmlFor="lod-budget">LOD budget</label>
-          <select
-            id="lod-budget"
-            className="rounded border border-slate-300 px-1 py-0.5"
-            value={budgetPreset}
-            onChange={(event) => setBudgetPreset(event.target.value as typeof budgetPreset)}
-          >
-            <option value="auto">Auto ({graph.adaptiveBudget})</option>
-            <option value="500">500</option>
-            <option value="1000">1000</option>
-            <option value="2000">2000</option>
-            <option value="unlimited">Unlimited</option>
-          </select>
-          <span className="ml-1">Anchored: {anchoredAllianceIds.length}</span>
-          <button
-            type="button"
-            className="rounded border border-slate-300 px-1 py-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={() => setAnchoredAllianceIds([])}
-            disabled={anchoredAllianceIds.length === 0}
-          >
-            Clear anchors
-          </button>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700">
-          <div className="uppercase tracking-wide text-slate-500">Edge legend</div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-            {EDGE_LEGEND_ITEMS.map((item) => (
-              <div key={item.key} className="flex items-center gap-1">
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-2.5 w-2.5 rounded-sm"
-                  style={{ backgroundColor: item.color }}
-                />
-                <span>{item.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div> : null}
-      {!isFullscreen ? <div className="mb-2 text-xs text-muted">
-        {graph.nodes.length} alliances shown | {graph.renderedEdges} treaties shown | Node size by {graph.scoreSizingActive ? "score" : "connections"}
-        {graph.scoreSizingActive
-          ? ` | scored ${graph.scoreSizedNodeCount}/${graph.nodes.length} (${graph.scoreDay ?? "n/a"})`
-          : ""}
-      </div> : null}
-      {!isFullscreen && scoreStatusRows ? <div className="mb-2 rounded border border-rose-200 bg-rose-50 px-2 py-2 text-[11px] text-rose-900">
-        <div className="font-medium">{scoreStatusRows.title}</div>
-        <div className="mt-0.5">{scoreStatusRows.message}</div>
-        {scoreStatusRows.details ? <div className="mt-0.5 text-rose-700">{scoreStatusRows.details}</div> : null}
-        {scoreStatusRows.actionableRetry ? (
-          <div className="mt-2">
-            <button
-              type="button"
-              className="rounded border border-rose-300 bg-white px-2 py-0.5 text-[11px] hover:bg-rose-100"
-              onClick={onRetryScoreLoad}
-            >
-              Retry score load
-            </button>
-          </div>
-        ) : null}
-      </div> : null}
+      <NetworkViewPanel
+        isFullscreen={isFullscreen}
+        graph={graph}
+        budgetPreset={budgetPreset}
+        anchoredCount={anchoredAllianceIds.length}
+        onBudgetChange={setBudgetPreset}
+        onClearAnchors={() => setAnchoredAllianceIds([])}
+        onEnterFullscreen={onEnterFullscreen}
+        onExitFullscreen={onExitFullscreen}
+        scoreStatusRows={scoreStatusRows}
+        onRetryScoreLoad={onRetryScoreLoad}
+      />
+      {!isFullscreen && workerError ? (
+        <div className="mb-2 rounded border border-rose-200 bg-rose-50 px-2 py-2 text-[11px] text-rose-900">{workerError}</div>
+      ) : null}
       <div
         ref={hostRef}
         className={isFullscreen ? "h-full overflow-hidden rounded-xl border border-slate-200" : "h-[350px] overflow-hidden rounded-xl border border-slate-200"}

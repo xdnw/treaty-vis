@@ -1,26 +1,18 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  loadTimelapseBundle,
-  resolveAllianceFlagSnapshot,
-  selectTimelapseIndexes,
-  selectTimelapsePulse,
-  type TimelapseDataBundle
-} from "@/domain/timelapse/loader";
-import { loadScoreRuntime, type ScoreLoaderSnapshot } from "@/domain/timelapse/scoreLoader";
-import type { AllianceFlagSnapshot, AllianceScoresRuntime } from "@/domain/timelapse/schema";
-import { buildPulseSeries, countByAction, selectEvents, type PulsePoint } from "@/domain/timelapse/selectors";
-import {
-  deserializeQueryState,
-  serializeQueryState,
-  type QueryState,
-  useFilterStore
-} from "@/features/filters/filterStore";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { resolveAllianceFlagSnapshot } from "@/domain/timelapse/loader";
+import type { AllianceFlagSnapshot } from "@/domain/timelapse/schema";
+import { countByAction } from "@/domain/timelapse/selectors";
 import { FilterBar } from "@/features/filters/FilterBar";
 import { PlaybackControls } from "@/features/filters/PlaybackControls";
 import { InspectorView } from "@/features/inspector/InspectorView";
 import { NetworkAllianceHint, type NetworkAllianceHintData } from "@/features/network/NetworkAllianceHint";
 import { shouldExitNetworkFullscreenOnEscape } from "@/features/network/networkViewPolicy";
 import { formatNumber } from "@/lib/format";
+import { useAppQueryState } from "@/app/hooks/useAppQueryState";
+import { usePlaybackTicker } from "@/app/hooks/usePlaybackTicker";
+import { useTimelapseData } from "@/app/hooks/useTimelapseData";
+import { useTimelapseWorkerSelection } from "@/app/hooks/useTimelapseWorkerSelection";
+import { useUrlStateSync } from "@/app/hooks/useUrlStateSync";
 
 const TimelineView = lazy(() => import("@/features/timeline/TimelineView").then((module) => ({ default: module.TimelineView })));
 const NetworkView = lazy(() => import("@/features/network/NetworkView").then((module) => ({ default: module.NetworkView })));
@@ -47,69 +39,27 @@ function downloadObject(filename: string, payload: string, contentType: string):
 }
 
 export function App() {
-  const [bundle, setBundle] = useState<TimelapseDataBundle | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [workerScopedIndexes, setWorkerScopedIndexes] = useState<number[] | null>(null);
-  const [workerPulse, setWorkerPulse] = useState<PulsePoint[] | null>(null);
-  const [allianceScores, setAllianceScores] = useState<AllianceScoresRuntime | null>(null);
-  const [scoreLoadSnapshot, setScoreLoadSnapshot] = useState<ScoreLoaderSnapshot | null>(null);
-  const [scoreRetryNonce, setScoreRetryNonce] = useState(0);
+  const { query, actions } = useAppQueryState();
+  const showFlags = query.filters.showFlags;
   const [networkFullscreenHint, setNetworkFullscreenHint] = useState<NetworkAllianceHintData | null>(null);
-  const urlSyncTimerRef = useRef<number | null>(null);
-  const selectionRequestRef = useRef(0);
-  const pulseRequestRef = useRef(0);
-  const scoreLoadRequestRef = useRef(0);
-  const scoreAttemptKeyRef = useRef<string | null>(null);
 
-  const time = useFilterStore((state) => state.query.time);
-  const playback = useFilterStore((state) => state.query.playback);
-  const focus = useFilterStore((state) => state.query.focus);
-  const filters = useFilterStore((state) => state.query.filters);
-  const showFlags = filters.showFlags;
-  const textQuery = useFilterStore((state) => state.query.textQuery);
-  const sort = useFilterStore((state) => state.query.sort);
-  const setStateFromUrl = useFilterStore((state) => state.setStateFromUrl);
-  const setTimeRange = useFilterStore((state) => state.setTimeRange);
-  const setPlayhead = useFilterStore((state) => state.setPlayhead);
-  const setPlaying = useFilterStore((state) => state.setPlaying);
-  const setFocus = useFilterStore((state) => state.setFocus);
-  const clearFocus = useFilterStore((state) => state.clearFocus);
-  const resetAll = useFilterStore((state) => state.resetAll);
-  const isNetworkFullscreen = useFilterStore((state) => state.isNetworkFullscreen);
-  const setNetworkFullscreen = useFilterStore((state) => state.setNetworkFullscreen);
-
-  const query = useMemo<QueryState>(
-    () => ({
-      time,
-      playback,
-      focus,
-      filters,
-      textQuery,
-      sort
-    }),
-    [filters, focus, playback, sort, textQuery, time]
-  );
-
-  useEffect(() => {
-    setStateFromUrl(deserializeQueryState(window.location.search));
-  }, [setStateFromUrl]);
+  useUrlStateSync(query, actions.setStateFromUrl);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!shouldExitNetworkFullscreenOnEscape(event.key, isNetworkFullscreen)) {
+      if (!shouldExitNetworkFullscreenOnEscape(event.key, actions.isNetworkFullscreen)) {
         return;
       }
       event.preventDefault();
-      setNetworkFullscreen(false);
+      actions.setNetworkFullscreen(false);
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isNetworkFullscreen, setNetworkFullscreen]);
+  }, [actions]);
 
   useEffect(() => {
-    if (!isNetworkFullscreen) {
+    if (!actions.isNetworkFullscreen) {
       setNetworkFullscreenHint(null);
       return;
     }
@@ -119,66 +69,19 @@ export function App() {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [isNetworkFullscreen]);
+  }, [actions.isNetworkFullscreen]);
 
-  useEffect(() => {
-    let mounted = true;
-    setLoading(true);
-    loadTimelapseBundle({ showFlags })
-      .then((result) => {
-        if (!mounted) {
-          return;
-        }
-        setBundle(result);
-      })
-      .catch((reason) => {
-        if (!mounted) {
-          return;
-        }
-        setError(reason instanceof Error ? reason.message : "Unknown loading error");
-      })
-      .finally(() => {
-        if (mounted) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, [showFlags]);
-
-  useEffect(() => {
-    if (urlSyncTimerRef.current !== null) {
-      window.clearTimeout(urlSyncTimerRef.current);
-      urlSyncTimerRef.current = null;
-    }
-
-    if (query.playback.isPlaying) {
-      return;
-    }
-
-    urlSyncTimerRef.current = window.setTimeout(() => {
-      const serialized = serializeQueryState({
-        ...query,
-        playback: {
-          ...query.playback,
-          isPlaying: false
-        }
-      });
-      const nextSearch = serialized ? `?${serialized}` : "";
-      if (window.location.search !== nextSearch) {
-        window.history.replaceState({}, "", `${window.location.pathname}${nextSearch}`);
-      }
-    }, 180);
-
-    return () => {
-      if (urlSyncTimerRef.current !== null) {
-        window.clearTimeout(urlSyncTimerRef.current);
-        urlSyncTimerRef.current = null;
-      }
-    };
-  }, [query]);
+  const {
+    bundle,
+    loading,
+    error,
+    setError,
+    allianceScores,
+    scoreLoadSnapshot,
+    retryScoreLoad,
+    scoreFileDeclared,
+    hasScoreRankData
+  } = useTimelapseData(showFlags, query.filters.sizeByScore);
 
   const baseQuery = useMemo(
     () => ({
@@ -189,256 +92,45 @@ export function App() {
         isPlaying: false
       }
     }),
-    [query]
+    [
+      query.time,
+      query.focus,
+      query.filters,
+      query.textQuery,
+      query.sort,
+      query.playback.speed
+    ]
   );
 
-  const derived = useMemo(
-    () => {
-      if (!bundle) {
-        return {
-          datasetKey: "__loading__",
-          events: [],
-          indices: {
-            allEventIndexes: [],
-            byAction: {},
-            byType: {},
-            bySource: {},
-            byAlliance: {},
-            eventIdToIndex: {},
-            allActions: [],
-            allTypes: [],
-            allSources: [],
-            alliances: [],
-            minTimestamp: null,
-            maxTimestamp: null
-          },
-          allianceScoreRanksByDay: null
-        };
-      }
-
-      const firstEventId = bundle.events[0]?.event_id ?? "none";
-      const lastEventId = bundle.events[bundle.events.length - 1]?.event_id ?? "none";
-      const datasetKey =
-        bundle.manifest?.datasetId ??
-        `unversioned:${bundle.summary.generated_at}:${bundle.events.length}:${firstEventId}:${lastEventId}`;
-
-      return {
-        datasetKey,
-        events: bundle.events,
-        indices: bundle.indices,
-        allianceScoreRanksByDay: bundle.allianceScoreRanksByDay
-      };
-    },
-    [bundle]
-  );
-
-  const scoreFileDeclared = Boolean(bundle?.manifest?.files?.["alliance_scores_v2.msgpack"]);
-  const hasScoreRankData = useMemo(() => {
-    if (!bundle?.allianceScoreRanksByDay) {
-      return false;
-    }
-    return Object.keys(bundle.allianceScoreRanksByDay).length > 0;
-  }, [bundle?.allianceScoreRanksByDay]);
-
-  useEffect(() => {
-    if (!bundle) {
-      return;
-    }
-
-    if (!scoreFileDeclared && hasScoreRankData) {
-      console.warn(
-        "[timelapse] Score sizing disabled: manifest missing 'alliance_scores_v2.msgpack'. " +
-          "Run 'npm run data:sync' after generating score artifacts."
-      );
-    }
-  }, [bundle, hasScoreRankData, scoreFileDeclared]);
-
-  useEffect(() => {
-    if (!bundle) {
-      return;
-    }
-
-    setAllianceScores(null);
-    setScoreLoadSnapshot(null);
-    setScoreRetryNonce(0);
-    scoreAttemptKeyRef.current = null;
-  }, [bundle?.manifest?.datasetId]);
-
-  useEffect(() => {
-    if (!bundle?.manifest) {
-      return;
-    }
-
-    if (!scoreFileDeclared) {
-      return;
-    }
-
-    const attemptKey = `${bundle.manifest.datasetId}:${scoreRetryNonce}`;
-    if (scoreAttemptKeyRef.current === attemptKey) {
-      return;
-    }
-    scoreAttemptKeyRef.current = attemptKey;
-
-    let mounted = true;
-    scoreLoadRequestRef.current += 1;
-    const nextRequestId = `${bundle.manifest.datasetId}:score:${scoreLoadRequestRef.current}:${scoreRetryNonce}`;
-
-    void loadScoreRuntime({
-      manifest: bundle.manifest,
-      requestId: nextRequestId,
-      forceNetwork: scoreRetryNonce > 0,
-      onEvent: (snapshot) => {
-        if (!mounted || snapshot.requestId !== nextRequestId) {
-          return;
-        }
-        setScoreLoadSnapshot(snapshot);
-        if (snapshot.runtime) {
-          setAllianceScores(snapshot.runtime);
-        }
-      }
-    });
-
-    return () => {
-      mounted = false;
-    };
-  }, [bundle?.manifest, scoreFileDeclared, scoreRetryNonce]);
-
-  useEffect(() => {
-    if (!bundle) {
-      return;
-    }
-
-    if (query.filters.sizeByScore && !scoreFileDeclared) {
-      console.warn(
-        "[timelapse] Ignoring 'sizeByScore=1' because manifest does not declare 'alliance_scores_v2.msgpack'."
-      );
-    }
-  }, [bundle, query.filters.sizeByScore, scoreFileDeclared]);
-
-  useEffect(() => {
-    if (!bundle) {
-      setWorkerScopedIndexes(null);
-      return;
-    }
-
-    selectionRequestRef.current += 1;
-    const requestId = selectionRequestRef.current;
-    setWorkerScopedIndexes(null);
-
-    void selectTimelapseIndexes(baseQuery).then((workerIndexes) => {
-      if (selectionRequestRef.current !== requestId) {
-        return;
-      }
-      if (workerIndexes) {
-        setWorkerScopedIndexes(Array.from(workerIndexes));
-        return;
-      }
-      setWorkerScopedIndexes(selectEvents(derived, baseQuery).indexes);
-    });
-  }, [baseQuery, bundle, derived]);
-
-  const scopedSelectionIndexes = useMemo(() => {
-    if (workerScopedIndexes !== null) {
-      return workerScopedIndexes;
-    }
-    return selectEvents(derived, baseQuery).indexes;
-  }, [baseQuery, derived, workerScopedIndexes]);
+  const derivedEvents = bundle?.events ?? [];
+  const { scopedSelectionIndexes, pulse } = useTimelapseWorkerSelection({
+    bundle,
+    baseQuery,
+    onError: setError
+  });
 
   const scopedEvents = useMemo(
-    () => scopedSelectionIndexes.map((index) => derived.events[index]),
-    [derived.events, scopedSelectionIndexes]
+    () => scopedSelectionIndexes.map((index) => derivedEvents[index]).filter(Boolean),
+    [derivedEvents, scopedSelectionIndexes]
   );
 
-  useEffect(() => {
-    if (!bundle) {
-      setWorkerPulse(null);
-      return;
-    }
-
-    pulseRequestRef.current += 1;
-    const requestId = pulseRequestRef.current;
-    setWorkerPulse(null);
-
-    void selectTimelapsePulse(baseQuery, 280, null).then((pulseFromWorker) => {
-      if (pulseRequestRef.current !== requestId) {
-        return;
-      }
-      if (pulseFromWorker) {
-        setWorkerPulse(pulseFromWorker);
-        return;
-      }
-      setWorkerPulse(buildPulseSeries(bundle.events, scopedSelectionIndexes, 280, null));
-    });
-  }, [baseQuery, bundle, scopedSelectionIndexes]);
-
-  const timelineTicks = useMemo(
-    () => uniqueDayTicks(scopedEvents.map((event) => event.timestamp)),
-    [scopedEvents]
-  );
+  const timelineTicks = useMemo(() => uniqueDayTicks(scopedEvents.map((event) => event.timestamp)), [scopedEvents]);
 
   useEffect(() => {
     if (!bundle) {
       return;
     }
-    if (!query.playback.playhead) {
-      setPlayhead(bundle.indices.maxTimestamp);
+    if (!query.playback.playhead && bundle.indices.maxTimestamp) {
+      actions.setPlayhead(bundle.indices.maxTimestamp);
     }
-  }, [bundle, query.playback.playhead, setPlayhead]);
+  }, [actions, bundle, query.playback.playhead]);
 
-  const handleSetPlayhead = useCallback(
-    (nextPlayhead: string | null) => {
-      setPlayhead(nextPlayhead);
-    },
-    [setPlayhead]
-  );
-
-  const handleSetRange = useCallback(
-    (start: string | null, end: string | null) => {
-      setTimeRange(start, end);
-    },
-    [setTimeRange]
-  );
-
-  useEffect(() => {
-    if (!query.playback.isPlaying || timelineTicks.length === 0) {
-      return;
-    }
-
-    let frame = 0;
-    let last = performance.now();
-    let carry = 0;
-    const frameBudgetMs = 380 / query.playback.speed;
-    const currentIndex = Math.max(
-      timelineTicks.findIndex((item) => item === query.playback.playhead),
-      0
-    );
-    let nextIndex = currentIndex;
-
-    const tick = (now: number) => {
-      const delta = now - last;
-      last = now;
-      carry += delta;
-
-      if (carry >= frameBudgetMs) {
-        carry = 0;
-        nextIndex += 1;
-        if (nextIndex >= timelineTicks.length) {
-          setPlaying(false);
-          return;
-        }
-        handleSetPlayhead(timelineTicks[nextIndex]);
-      }
-      frame = requestAnimationFrame(tick);
-    };
-
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [handleSetPlayhead, query.playback.isPlaying, query.playback.playhead, query.playback.speed, setPlaying, timelineTicks]);
-
-  const pulse = useMemo(
-    () => workerPulse ?? buildPulseSeries(bundle?.events ?? [], scopedSelectionIndexes, 280, null),
-    [bundle?.events, scopedSelectionIndexes, workerPulse]
-  );
+  usePlaybackTicker({
+    playback: query.playback,
+    timelineTicks,
+    setPlayhead: actions.setPlayhead,
+    setPlaying: actions.setPlaying
+  });
 
   const hasScoreData = scoreFileDeclared;
   const allianceScoreDays = useMemo(() => allianceScores?.dayKeys ?? [], [allianceScores]);
@@ -464,6 +156,13 @@ export function App() {
       range: query.time
     }),
     [query.focus.allianceId, query.focus.edgeKey, query.playback.playhead, query.time, scopedEvents.length]
+  );
+
+  const handleSetRange = useCallback(
+    (start: string | null, end: string | null) => {
+      actions.setTimeRange(start, end);
+    },
+    [actions]
   );
 
   const handleExportCsv = () => {
@@ -531,7 +230,7 @@ export function App() {
 
   return (
     <>
-      {!isNetworkFullscreen ? (
+      {!actions.isNetworkFullscreen ? (
         <main className="mx-auto max-w-7xl space-y-4 p-5 lg:p-8">
           <section className="panel overflow-hidden p-5">
             <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -573,7 +272,7 @@ export function App() {
               <button
                 type="button"
                 className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
-                onClick={resetAll}
+                onClick={actions.resetAll}
               >
                 Reset All State
               </button>
@@ -583,7 +282,7 @@ export function App() {
               <button
                 type="button"
                 className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={clearFocus}
+                onClick={actions.clearFocus}
                 disabled={query.focus.allianceId === null && query.focus.edgeKey === null}
               >
                 Clear Focus
@@ -619,7 +318,7 @@ export function App() {
                 pulse={pulse}
                 playhead={query.playback.playhead}
                 timeRange={query.time}
-                onSetPlayhead={handleSetPlayhead}
+                onSetPlayhead={actions.setPlayhead}
                 onSetRange={handleSetRange}
               />
             </Suspense>
@@ -640,13 +339,13 @@ export function App() {
                 allianceScoreDays={allianceScoreDays}
                 scoreLoadSnapshot={scoreLoadSnapshot}
                 scoreManifestDeclared={scoreFileDeclared}
-                onRetryScoreLoad={() => setScoreRetryNonce((current) => current + 1)}
+                onRetryScoreLoad={retryScoreLoad}
                 resolveAllianceFlagAtPlayhead={resolveAllianceFlagAtPlayhead}
-                onFocusAlliance={(allianceId) => setFocus({ allianceId, edgeKey: null, eventId: null })}
-                onFocusEdge={(edgeKey) => setFocus({ edgeKey, eventId: null })}
+                onFocusAlliance={(allianceId) => actions.setFocus({ allianceId, edgeKey: null, eventId: null })}
+                onFocusEdge={(edgeKey) => actions.setFocus({ allianceId: query.focus.allianceId, edgeKey, eventId: null })}
                 isFullscreen={false}
-                onEnterFullscreen={() => setNetworkFullscreen(true)}
-                onExitFullscreen={() => setNetworkFullscreen(false)}
+                onEnterFullscreen={() => actions.setNetworkFullscreen(true)}
+                onExitFullscreen={() => actions.setNetworkFullscreen(false)}
                 forceFullscreenLabels={false}
                 isPlaying={query.playback.isPlaying}
                 onFullscreenHintChange={undefined}
@@ -656,13 +355,13 @@ export function App() {
 
           <InspectorView
             events={scopedEvents}
-            onSelectPlayhead={handleSetPlayhead}
-            onFocusAlliance={(allianceId) => setFocus({ allianceId, edgeKey: null })}
+            onSelectPlayhead={actions.setPlayhead}
+            onFocusAlliance={(allianceId) => actions.setFocus({ allianceId, edgeKey: null, eventId: query.focus.eventId })}
           />
         </main>
       ) : null}
 
-      {isNetworkFullscreen ? (
+      {actions.isNetworkFullscreen ? (
         <div className="fixed inset-0 z-50 bg-white p-2 md:p-3">
           <div className="grid h-full min-h-0 grid-rows-[1fr_auto] gap-2 md:grid-cols-[1fr_340px] md:grid-rows-1 md:gap-3">
             <div className="min-h-0 md:row-span-1">
@@ -683,13 +382,13 @@ export function App() {
                   allianceScoreDays={allianceScoreDays}
                   scoreLoadSnapshot={scoreLoadSnapshot}
                   scoreManifestDeclared={scoreFileDeclared}
-                  onRetryScoreLoad={() => setScoreRetryNonce((current) => current + 1)}
+                  onRetryScoreLoad={retryScoreLoad}
                   resolveAllianceFlagAtPlayhead={resolveAllianceFlagAtPlayhead}
-                  onFocusAlliance={(allianceId) => setFocus({ allianceId, edgeKey: null, eventId: null })}
-                  onFocusEdge={(edgeKey) => setFocus({ edgeKey, eventId: null })}
+                  onFocusAlliance={(allianceId) => actions.setFocus({ allianceId, edgeKey: null, eventId: null })}
+                  onFocusEdge={(edgeKey) => actions.setFocus({ allianceId: query.focus.allianceId, edgeKey, eventId: null })}
                   isFullscreen
-                  onEnterFullscreen={() => setNetworkFullscreen(true)}
-                  onExitFullscreen={() => setNetworkFullscreen(false)}
+                  onEnterFullscreen={() => actions.setNetworkFullscreen(true)}
+                  onExitFullscreen={() => actions.setNetworkFullscreen(false)}
                   forceFullscreenLabels
                   isPlaying={query.playback.isPlaying}
                   onFullscreenHintChange={setNetworkFullscreenHint}

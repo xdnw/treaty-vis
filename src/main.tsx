@@ -5,7 +5,9 @@ import { App } from "@/app/App";
 import { initTimelapsePerfCollector } from "@/lib/perf";
 import "@/index.css";
 
-initTimelapsePerfCollector();
+if (import.meta.env.DEV) {
+  initTimelapsePerfCollector();
+}
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

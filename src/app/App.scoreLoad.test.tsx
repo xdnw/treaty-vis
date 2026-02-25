@@ -11,8 +11,8 @@ const loadScoreRuntimeMock = vi.fn();
 vi.mock("@/domain/timelapse/loader", () => ({
   loadTimelapseBundle: (...args: unknown[]) => loadTimelapseBundleMock(...args),
   resolveAllianceFlagSnapshot: vi.fn(() => null),
-  selectTimelapseIndexes: vi.fn(async () => null),
-  selectTimelapsePulse: vi.fn(async () => null)
+  selectTimelapseIndexes: vi.fn(async () => new Uint32Array()),
+  selectTimelapsePulse: vi.fn(async () => [])
 }));
 
 vi.mock("@/domain/timelapse/scoreLoader", () => ({

@@ -381,276 +381,183 @@ export function serializeQueryState(query: QueryState): string {
   return params.toString();
 }
 
-export const useFilterStore = create<FilterStore>((set) => ({
-  query: createDefaultQueryState(),
-  isNetworkFullscreen: false,
-  setStateFromUrl: (state) => {
-    set((current) => ({
-      query: {
-        ...current.query,
+export const useFilterStore = create<FilterStore>((set) => {
+  const updateQuery = (updater: (query: QueryState) => QueryState): void => {
+    set((state) => ({ query: updater(state.query) }));
+  };
+
+  const updateFilters = (updater: (filters: QueryFilters) => QueryFilters): void => {
+    updateQuery((query) => ({
+      ...query,
+      filters: updater(query.filters)
+    }));
+  };
+
+  const resetQueryState = (): void => {
+    set({ query: createDefaultQueryState(), isNetworkFullscreen: false });
+  };
+
+  return {
+    query: createDefaultQueryState(),
+    isNetworkFullscreen: false,
+    setStateFromUrl: (state) => {
+      updateQuery((query) => ({
+        ...query,
         ...state,
         time: {
-          ...current.query.time,
+          ...query.time,
           ...(state.time ?? {})
         },
         playback: {
-          ...current.query.playback,
+          ...query.playback,
           ...(state.playback ?? {})
         },
         focus: {
-          ...current.query.focus,
+          ...query.focus,
           ...(state.focus ?? {})
         },
         filters: {
-          ...current.query.filters,
+          ...query.filters,
           ...(state.filters ?? {})
         },
         sort: {
-          ...current.query.sort,
+          ...query.sort,
           ...(state.sort ?? {})
         }
-      }
-    }));
-  },
-  setNetworkFullscreen: (value) => {
-    set({ isNetworkFullscreen: value });
-  },
-  setTimeRange: (start, end) => {
-    set((state) => ({
-      query: {
-        ...state.query,
+      }));
+    },
+    setNetworkFullscreen: (value) => {
+      set({ isNetworkFullscreen: value });
+    },
+    setTimeRange: (start, end) => {
+      updateQuery((query) => ({
+        ...query,
         time: {
           start,
           end
         }
-      }
-    }));
-  },
-  setPlayhead: (playhead) => {
-    set((state) => ({
-      query: {
-        ...state.query,
+      }));
+    },
+    setPlayhead: (playhead) => {
+      updateQuery((query) => ({
+        ...query,
         playback: {
-          ...state.query.playback,
+          ...query.playback,
           playhead
         }
-      }
-    }));
-  },
-  setPlaying: (isPlaying) => {
-    set((state) => ({
-      query: {
-        ...state.query,
+      }));
+    },
+    setPlaying: (isPlaying) => {
+      updateQuery((query) => ({
+        ...query,
         playback: {
-          ...state.query.playback,
+          ...query.playback,
           isPlaying
         }
-      }
-    }));
-  },
-  setPlaybackSpeed: (speed) => {
-    set((state) => ({
-      query: {
-        ...state.query,
+      }));
+    },
+    setPlaybackSpeed: (speed) => {
+      updateQuery((query) => ({
+        ...query,
         playback: {
-          ...state.query.playback,
+          ...query.playback,
           speed
         }
-      }
-    }));
-  },
-  setTextQuery: (queryText) => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        textQuery: queryText
-      }
-    }));
-  },
-  setSort: (field, direction) => {
-    set((state) => ({
-      query: {
-        ...state.query,
+      }));
+    },
+    setTextQuery: (queryText) => {
+      updateQuery((query) => ({ ...query, textQuery: queryText }));
+    },
+    setSort: (field, direction) => {
+      updateQuery((query) => ({
+        ...query,
         sort: {
           field,
           direction
         }
-      }
-    }));
-  },
-  setFocus: (focus) => {
-    set((state) => ({
-      query: {
-        ...state.query,
+      }));
+    },
+    setFocus: (focus) => {
+      updateQuery((query) => ({
+        ...query,
         focus: {
-          ...state.query.focus,
+          ...query.focus,
           ...focus
         }
-      }
-    }));
-  },
-  clearFocus: () => {
-    set((state) => ({
-      query: {
-        ...state.query,
+      }));
+    },
+    clearFocus: () => {
+      updateQuery((query) => ({
+        ...query,
         focus: {
           allianceId: null,
           edgeKey: null,
           eventId: null
         }
-      }
-    }));
-  },
-  toggleAction: (action) => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          actions: toggleArrayString(state.query.filters.actions, action)
-        }
-      }
-    }));
-  },
-  toggleTreatyType: (type) => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          treatyTypes: toggleArrayString(state.query.filters.treatyTypes, type)
-        }
-      }
-    }));
-  },
-  toggleSource: (source) => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          sources: toggleArrayString(state.query.filters.sources, source)
-        }
-      }
-    }));
-  },
-  toggleAlliance: (allianceId) => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          alliances: toggleArrayNumber(state.query.filters.alliances, allianceId)
-        }
-      }
-    }));
-  },
-  setAnchoredAllianceIds: (allianceIds) => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          anchoredAllianceIds: [...new Set(allianceIds.filter((value) => Number.isFinite(value)))].sort((a, b) => a - b)
-        }
-      }
-    }));
-  },
-  setIncludeInferred: (value) => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          includeInferred: value
-        }
-      }
-    }));
-  },
-  setIncludeNoise: (value) => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          includeNoise: value
-        }
-      }
-    }));
-  },
-  setEvidenceMode: (mode) => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          evidenceMode: mode
-        }
-      }
-    }));
-  },
-  setTopXByScore: (value) => {
-    const normalized = value !== null && Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          topXByScore: normalized
-        }
-      }
-    }));
-  },
-  setSizeByScore: (value) => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          sizeByScore: value
-        }
-      }
-    }));
-  },
-  setScoreSizeContrast: (value) => {
-    const normalized = normalizeScoreSizeContrast(value);
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          scoreSizeContrast: normalized
-        }
-      }
-    }));
-  },
-  setMaxNodeRadius: (value) => {
-    const normalized = normalizeMaxNodeRadius(value);
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          maxNodeRadius: normalized
-        }
-      }
-    }));
-  },
-  setShowFlags: (value) => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        filters: {
-          ...state.query.filters,
-          showFlags: value
-        }
-      }
-    }));
-  },
-  clearFilters: () => {
-    set({ query: createDefaultQueryState(), isNetworkFullscreen: false });
-  },
-  resetAll: () => {
-    set({ query: createDefaultQueryState(), isNetworkFullscreen: false });
-  }
-}));
+      }));
+    },
+    toggleAction: (action) => {
+      updateFilters((filters) => ({
+        ...filters,
+        actions: toggleArrayString(filters.actions, action)
+      }));
+    },
+    toggleTreatyType: (type) => {
+      updateFilters((filters) => ({
+        ...filters,
+        treatyTypes: toggleArrayString(filters.treatyTypes, type)
+      }));
+    },
+    toggleSource: (source) => {
+      updateFilters((filters) => ({
+        ...filters,
+        sources: toggleArrayString(filters.sources, source)
+      }));
+    },
+    toggleAlliance: (allianceId) => {
+      updateFilters((filters) => ({
+        ...filters,
+        alliances: toggleArrayNumber(filters.alliances, allianceId)
+      }));
+    },
+    setAnchoredAllianceIds: (allianceIds) => {
+      updateFilters((filters) => ({
+        ...filters,
+        anchoredAllianceIds: [...new Set(allianceIds.filter((value) => Number.isFinite(value)))].sort((a, b) => a - b)
+      }));
+    },
+    setIncludeInferred: (value) => {
+      updateFilters((filters) => ({ ...filters, includeInferred: value }));
+    },
+    setIncludeNoise: (value) => {
+      updateFilters((filters) => ({ ...filters, includeNoise: value }));
+    },
+    setEvidenceMode: (mode) => {
+      updateFilters((filters) => ({ ...filters, evidenceMode: mode }));
+    },
+    setTopXByScore: (value) => {
+      const normalized = value !== null && Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
+      updateFilters((filters) => ({ ...filters, topXByScore: normalized }));
+    },
+    setSizeByScore: (value) => {
+      updateFilters((filters) => ({ ...filters, sizeByScore: value }));
+    },
+    setScoreSizeContrast: (value) => {
+      const normalized = normalizeScoreSizeContrast(value);
+      updateFilters((filters) => ({ ...filters, scoreSizeContrast: normalized }));
+    },
+    setMaxNodeRadius: (value) => {
+      const normalized = normalizeMaxNodeRadius(value);
+      updateFilters((filters) => ({ ...filters, maxNodeRadius: normalized }));
+    },
+    setShowFlags: (value) => {
+      updateFilters((filters) => ({ ...filters, showFlags: value }));
+    },
+    clearFilters: () => {
+      resetQueryState();
+    },
+    resetAll: () => {
+      resetQueryState();
+    }
+  };
+});
