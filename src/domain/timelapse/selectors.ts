@@ -10,7 +10,7 @@ import {
 } from "@/domain/timelapse/queryEngine";
 import type { QueryState } from "@/features/filters/filterStore";
 
-const TERMINAL_ACTIONS = new Set(["cancelled", "expired", "ended", "inferred_cancelled"]);
+const TERMINAL_ACTIONS = new Set(["cancelled", "expired", "ended", "terminated", "termination", "inferred_cancelled"]);
 
 export type TimelapseIndices = {
   allEventIndexes: number[];

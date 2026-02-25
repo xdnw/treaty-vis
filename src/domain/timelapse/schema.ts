@@ -4,6 +4,7 @@ const confidenceSchema = z.enum(["low", "medium", "high"]).catch("medium");
 
 export const timelapseEventSchema = z.object({
   event_id: z.string(),
+  event_sequence: z.number().int().nonnegative().catch(-1),
   timestamp: z.string(),
   action: z.string(),
   treaty_type: z.string(),

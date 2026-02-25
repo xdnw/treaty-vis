@@ -1,10 +1,19 @@
 import type { QueryState } from "@/features/filters/filterStore";
+import type { LayoutStrategy } from "@/features/network/layout";
 import type { FlagPressureLevel } from "@/features/network/flagRender";
 
 export const FLAG_PRESSURE_SCORE_ELEVATED_TRIGGER = 5;
 export const FLAG_PRESSURE_SCORE_ELEVATED_RECOVER = 1;
 export const FLAG_PRESSURE_SCORE_CRITICAL_TRIGGER = 7;
 export const FLAG_PRESSURE_SCORE_CRITICAL_RECOVER = 3;
+
+export const NETWORK_LAYOUT_STRATEGY: LayoutStrategy = "topology-biased";
+export const NETWORK_LAYOUT_TOPOLOGY_STRENGTH = 0.38;
+export const NETWORK_LAYOUT_TOPOLOGY_MAX_OFFSET = 18;
+export const NETWORK_LAYOUT_MAX_STEP_DISPLACEMENT = 6;
+export const NETWORK_LAYOUT_RELAX_TOPOLOGY_BOOST = 0.3;
+export const NETWORK_LAYOUT_RELAX_MAX_STEP_DISPLACEMENT = 12;
+export const NETWORK_LAYOUT_RELAX_MAX_OFFSET_BOOST = 12;
 
 export function derivePressureLevel(score: number, current: FlagPressureLevel): FlagPressureLevel {
   if (current === "none") {

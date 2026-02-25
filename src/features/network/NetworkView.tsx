@@ -5,7 +5,7 @@ import type { ScoreLoaderSnapshot } from "@/domain/timelapse/scoreLoader";
 import type { AllianceFlagSnapshot, AllianceScoresByDay, FlagAssetsPayload, TimelapseEvent } from "@/domain/timelapse/schema";
 import { resolveScoreRowForPlayhead } from "@/domain/timelapse/scoreDay";
 import { type QueryState, useFilterStore } from "@/features/filters/filterStore";
-import { dampPosition, positionForNode, type Point } from "@/features/network/layout";
+import { clampDisplacement, dampPosition, distanceBetween, resolveLayoutTargets, type Point } from "@/features/network/layout";
 import {
   FLAG_MAX_SPRITES,
   FLAG_PRESSURE_BUILD_MS,
@@ -17,6 +17,13 @@ import {
   type FlagRenderMode
 } from "@/features/network/flagRender";
 import {
+  NETWORK_LAYOUT_MAX_STEP_DISPLACEMENT,
+  NETWORK_LAYOUT_RELAX_MAX_OFFSET_BOOST,
+  NETWORK_LAYOUT_RELAX_MAX_STEP_DISPLACEMENT,
+  NETWORK_LAYOUT_RELAX_TOPOLOGY_BOOST,
+  NETWORK_LAYOUT_STRATEGY,
+  NETWORK_LAYOUT_TOPOLOGY_MAX_OFFSET,
+  NETWORK_LAYOUT_TOPOLOGY_STRENGTH,
   buildHoverResetKey,
   derivePressureLevel,
   quantizePlayheadIndexForAutoplay,
@@ -334,8 +341,10 @@ export function NetworkView({
   const [cameraRatio, setCameraRatio] = useState(1);
   const [atlasReady, setAtlasReady] = useState(false);
   const [framePressureLevel, setFramePressureLevel] = useState<FlagPressureLevel>("none");
+  const [layoutRelaxToken, setLayoutRelaxToken] = useState(0);
   const refreshFrameRef = useRef<number | null>(null);
   const previousPositionsRef = useRef<Map<string, Point>>(new Map());
+  const appliedLayoutRelaxTokenRef = useRef(0);
   const anchoredAllianceIds = useFilterStore((state) => state.query.filters.anchoredAllianceIds);
   const setAnchoredAllianceIds = useFilterStore((state) => state.setAnchoredAllianceIds);
   const anchoredAllianceIdsRef = useRef<number[]>(anchoredAllianceIds);
@@ -566,10 +575,21 @@ export function NetworkView({
   const graph = useMemo(() => {
     const graphBuildStartedAt = performance.now();
     const nodeMetaById = new Map<string, { degree: number }>();
+    const adjacencyByNodeId = new Map<string, Set<string>>();
     const nodeCounterparties = new Map<
       string,
       Map<string, { counterpartyLabel: string; treatyTypes: Set<string> }>
     >();
+
+    const connectNodes = (leftId: string, rightId: string) => {
+      const leftNeighbors = adjacencyByNodeId.get(leftId) ?? new Set<string>();
+      leftNeighbors.add(rightId);
+      adjacencyByNodeId.set(leftId, leftNeighbors);
+
+      const rightNeighbors = adjacencyByNodeId.get(rightId) ?? new Set<string>();
+      rightNeighbors.add(leftId);
+      adjacencyByNodeId.set(rightId, rightNeighbors);
+    };
 
     const addCounterparty = (nodeId: string, otherId: string, otherLabel: string, treatyType: string) => {
       const counterparties =
@@ -592,6 +612,8 @@ export function NetworkView({
       const target = nodeMetaById.get(edge.targetId) ?? { degree: 0 };
       target.degree += 1;
       nodeMetaById.set(edge.targetId, target);
+
+      connectNodes(edge.sourceId, edge.targetId);
 
       addCounterparty(
         edge.sourceId,
@@ -670,17 +692,48 @@ export function NetworkView({
 
     const previousPositions = previousPositionsRef.current;
     const nextPositions = new Map(previousPositions);
+    const applyRelaxLayout = layoutRelaxToken > appliedLayoutRelaxTokenRef.current;
+    const topologyStrength = Math.min(
+      1,
+      NETWORK_LAYOUT_TOPOLOGY_STRENGTH + (applyRelaxLayout ? NETWORK_LAYOUT_RELAX_TOPOLOGY_BOOST : 0)
+    );
+    const topologyMaxOffset =
+      NETWORK_LAYOUT_TOPOLOGY_MAX_OFFSET + (applyRelaxLayout ? NETWORK_LAYOUT_RELAX_MAX_OFFSET_BOOST : 0);
+    const maxStepDisplacement = applyRelaxLayout
+      ? NETWORK_LAYOUT_RELAX_MAX_STEP_DISPLACEMENT
+      : NETWORK_LAYOUT_MAX_STEP_DISPLACEMENT;
+    const deterministicTargets = resolveLayoutTargets({
+      nodeIds,
+      adjacencyByNodeId,
+      strategy: NETWORK_LAYOUT_STRATEGY,
+      topologyStrength,
+      topologyMaxOffset
+    });
+
+    let displacementSamples = 0;
+    let displacementSum = 0;
+    let displacementMax = 0;
 
     const nodes: NodePayload[] = nodeIds.map((id) => {
       const meta = nodeMetaById.get(id)!;
-      const deterministicTarget = positionForNode(id);
+      const deterministicTarget = deterministicTargets.get(id)!;
       const previousPosition = previousPositions.get(id);
       const anchored = anchoredAllianceIdLookup.has(id);
-      const pos = anchored
-        ? (previousPosition ?? deterministicTarget)
-        : previousPosition
-          ? dampPosition(previousPosition, deterministicTarget, NON_ANCHORED_DAMPING)
-          : deterministicTarget;
+      let pos: Point;
+      if (anchored) {
+        pos = previousPosition ?? deterministicTarget;
+      } else if (previousPosition) {
+        const damped = dampPosition(previousPosition, deterministicTarget, NON_ANCHORED_DAMPING);
+        pos = clampDisplacement(previousPosition, damped, maxStepDisplacement);
+        const stepDistance = distanceBetween(previousPosition, pos);
+        displacementSamples += 1;
+        displacementSum += stepDistance;
+        if (stepDistance > displacementMax) {
+          displacementMax = stepDistance;
+        }
+      } else {
+        pos = deterministicTarget;
+      }
       nextPositions.set(id, pos);
       const highlighted = focusedAlliance !== null && focusedAlliance === id;
       const nodeScore = scoreByNode.get(id) ?? null;
@@ -764,6 +817,7 @@ export function NetworkView({
     });
 
     const graphBuildMs = performance.now() - graphBuildStartedAt;
+    const averageDisplacement = displacementSamples > 0 ? displacementSum / displacementSamples : 0;
 
     return {
       adaptiveBudget,
@@ -782,7 +836,11 @@ export function NetworkView({
       scoreMax: maxVisibleScore,
       usedDayFallback: scoreResolution.usedFallback,
       scoreDay,
-      graphBuildMs
+      graphBuildMs,
+      layoutStrategy: NETWORK_LAYOUT_STRATEGY,
+      averageStepDisplacement: averageDisplacement,
+      maxStepDisplacement: displacementMax,
+      relaxAppliedToken: applyRelaxLayout ? layoutRelaxToken : 0
     };
   }, [
     adaptiveBudget,
@@ -797,6 +855,7 @@ export function NetworkView({
     flagAssetsPayload,
     focusedAllianceId,
     focusedEdgeKey,
+    layoutRelaxToken,
     maxNodeRadius,
     maxEdges,
     playhead,
@@ -824,7 +883,16 @@ export function NetworkView({
   }, [graph.unmappedTreatyTypes]);
 
   useEffect(() => {
+    if (graph.relaxAppliedToken <= 0) {
+      return;
+    }
+    appliedLayoutRelaxTokenRef.current = Math.max(appliedLayoutRelaxTokenRef.current, graph.relaxAppliedToken);
+  }, [graph.relaxAppliedToken]);
+
+  useEffect(() => {
     markTimelapsePerf("network.graph.build", graph.graphBuildMs);
+    markTimelapsePerf("network.layout.displacement.avg", graph.averageStepDisplacement);
+    markTimelapsePerf("network.layout.displacement.max", graph.maxStepDisplacement);
     pushNetworkFlagDiagnostic({
       stage: "graph-build",
       ts: Date.now(),
@@ -837,7 +905,16 @@ export function NetworkView({
       spriteCandidateCount: graph.flagResolvedNodeCount,
       graphBuildMs: Number(graph.graphBuildMs.toFixed(2))
     });
-  }, [cameraRatio, framePressureLevel, graph.flagRenderMode, graph.flagResolvedNodeCount, graph.graphBuildMs, graph.nodes.length]);
+  }, [
+    cameraRatio,
+    framePressureLevel,
+    graph.averageStepDisplacement,
+    graph.flagRenderMode,
+    graph.flagResolvedNodeCount,
+    graph.graphBuildMs,
+    graph.maxStepDisplacement,
+    graph.nodes.length
+  ]);
 
   useEffect(() => {
     if (!hovered) {
@@ -1257,6 +1334,7 @@ export function NetworkView({
         anchoredCount={anchoredAllianceIds.length}
         onBudgetChange={setBudgetPreset}
         onClearAnchors={() => setAnchoredAllianceIds([])}
+        onRelaxLayout={() => setLayoutRelaxToken((current) => current + 1)}
         onEnterFullscreen={onEnterFullscreen}
         onExitFullscreen={onExitFullscreen}
         scoreStatusRows={scoreStatusRows}

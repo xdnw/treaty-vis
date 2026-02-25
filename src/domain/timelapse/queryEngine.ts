@@ -1,6 +1,6 @@
 import { createScoreDayResolver } from "@/domain/timelapse/scoreDay";
 
-const TERMINAL_ACTIONS = new Set(["cancelled", "expired", "ended", "inferred_cancelled"]);
+const TERMINAL_ACTIONS = new Set(["cancelled", "expired", "ended", "terminated", "termination", "inferred_cancelled"]);
 
 export type TimelapseSortField = "timestamp" | "action" | "type" | "from" | "to" | "source";
 export type TimelapseSortDirection = "asc" | "desc";
@@ -38,6 +38,7 @@ export type TimelapseQueryLike = {
 
 export type TimelapseEventLike = {
   event_id: string;
+  event_sequence?: number;
   action: string;
   treaty_type: string;
   source?: string | null;
@@ -205,6 +206,14 @@ function compareByField(left: TimelapseEventLike, right: TimelapseEventLike, fie
     }
   }
 
+  const leftSequence = Number.isFinite(left.event_sequence) ? Number(left.event_sequence) : Number.POSITIVE_INFINITY;
+  const rightSequence = Number.isFinite(right.event_sequence)
+    ? Number(right.event_sequence)
+    : Number.POSITIVE_INFINITY;
+  if (leftSequence !== rightSequence) {
+    return leftSequence - rightSequence;
+  }
+
   const byEventId = left.event_id.localeCompare(right.event_id);
   if (byEventId !== 0) {
     return byEventId;
@@ -226,6 +235,13 @@ export function compareEventChronology(left: TimelapseEventLike, right: Timelaps
   const timestampOrder = left.timestamp.localeCompare(right.timestamp);
   if (timestampOrder !== 0) {
     return timestampOrder;
+  }
+  const leftSequence = Number.isFinite(left.event_sequence) ? Number(left.event_sequence) : Number.POSITIVE_INFINITY;
+  const rightSequence = Number.isFinite(right.event_sequence)
+    ? Number(right.event_sequence)
+    : Number.POSITIVE_INFINITY;
+  if (leftSequence !== rightSequence) {
+    return leftSequence - rightSequence;
   }
   return left.event_id.localeCompare(right.event_id);
 }

@@ -16,6 +16,7 @@ type Props = {
   anchoredCount: number;
   onBudgetChange: (value: "auto" | "500" | "1000" | "2000" | "unlimited") => void;
   onClearAnchors: () => void;
+  onRelaxLayout: () => void;
   onEnterFullscreen: () => void;
   onExitFullscreen: () => void;
   scoreStatusRows: ScoreFailureDiagnostic | null;
@@ -29,6 +30,7 @@ export function NetworkViewPanel({
   anchoredCount,
   onBudgetChange,
   onClearAnchors,
+  onRelaxLayout,
   onEnterFullscreen,
   onExitFullscreen,
   scoreStatusRows,
@@ -85,6 +87,14 @@ export function NetworkViewPanel({
               disabled={anchoredCount === 0}
             >
               Clear anchors
+            </button>
+            <button
+              type="button"
+              className="rounded border border-slate-300 px-1 py-0.5 hover:bg-slate-100"
+              onClick={onRelaxLayout}
+              disabled={graph.nodes.length === 0}
+            >
+              Re-pack / Relax
             </button>
           </div>
           <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700">

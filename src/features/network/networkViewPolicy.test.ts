@@ -4,6 +4,13 @@ import {
   FLAG_PRESSURE_SCORE_CRITICAL_TRIGGER,
   FLAG_PRESSURE_SCORE_ELEVATED_RECOVER,
   FLAG_PRESSURE_SCORE_ELEVATED_TRIGGER,
+  NETWORK_LAYOUT_MAX_STEP_DISPLACEMENT,
+  NETWORK_LAYOUT_RELAX_MAX_OFFSET_BOOST,
+  NETWORK_LAYOUT_RELAX_MAX_STEP_DISPLACEMENT,
+  NETWORK_LAYOUT_RELAX_TOPOLOGY_BOOST,
+  NETWORK_LAYOUT_STRATEGY,
+  NETWORK_LAYOUT_TOPOLOGY_MAX_OFFSET,
+  NETWORK_LAYOUT_TOPOLOGY_STRENGTH,
   buildHoverResetKey,
   derivePressureLevel,
   quantizePlayheadIndexForAutoplay,
@@ -198,6 +205,21 @@ describe("networkViewPolicy", () => {
     it("quantizes index more aggressively at high speeds", () => {
       expect(quantizePlayheadIndexForAutoplay(17, 16)).toBe(15);
       expect(quantizePlayheadIndexForAutoplay(17, 32)).toBe(16);
+    });
+  });
+
+  describe("layout tuning policy", () => {
+    it("keeps strategy and coefficients in valid ranges", () => {
+      expect(["hash", "topology-biased"]).toContain(NETWORK_LAYOUT_STRATEGY);
+      expect(NETWORK_LAYOUT_TOPOLOGY_STRENGTH).toBeGreaterThanOrEqual(0);
+      expect(NETWORK_LAYOUT_TOPOLOGY_STRENGTH).toBeLessThanOrEqual(1);
+      expect(NETWORK_LAYOUT_TOPOLOGY_MAX_OFFSET).toBeGreaterThan(0);
+      expect(NETWORK_LAYOUT_MAX_STEP_DISPLACEMENT).toBeGreaterThan(0);
+      expect(NETWORK_LAYOUT_RELAX_TOPOLOGY_BOOST).toBeGreaterThan(0);
+      expect(NETWORK_LAYOUT_RELAX_MAX_STEP_DISPLACEMENT).toBeGreaterThanOrEqual(
+        NETWORK_LAYOUT_MAX_STEP_DISPLACEMENT
+      );
+      expect(NETWORK_LAYOUT_RELAX_MAX_OFFSET_BOOST).toBeGreaterThanOrEqual(0);
     });
   });
 });

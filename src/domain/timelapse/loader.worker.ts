@@ -27,6 +27,7 @@ type WorkerBasePayload = Omit<LoaderWorkerPayload, "allianceFlagsRaw" | "flagAss
 
 type WorkerEvent = {
   event_id: string;
+  event_sequence?: number;
   action: string;
   treaty_type: string;
   source?: string | null;
@@ -49,7 +50,7 @@ const selectionCache = new Map<string, Uint32Array>();
 const pulseCache = new Map<string, WorkerPulsePoint[]>();
 const networkCache = new Map<string, Uint32Array>();
 let loadedState: WorkerLoadedState | null = null;
-const TERMINAL_ACTIONS = new Set(["cancelled", "expired", "ended", "inferred_cancelled"]);
+const TERMINAL_ACTIONS = new Set(["cancelled", "expired", "ended", "terminated", "termination", "inferred_cancelled"]);
 type WorkerScope = {
   addEventListener: (type: "message", listener: (event: MessageEvent<LoaderWorkerRequest>) => void) => void;
   postMessage: (message: unknown, transfer?: Transferable[]) => void;
@@ -67,12 +68,19 @@ async function fetchMsgpack<T>(url: string): Promise<T> {
 
 function sortEventsByTimestamp(events: unknown[]): unknown[] {
   return [...events].sort((leftRaw, rightRaw) => {
-    const left = leftRaw as { timestamp?: string; event_id?: string };
-    const right = rightRaw as { timestamp?: string; event_id?: string };
+    const left = leftRaw as { timestamp?: string; event_sequence?: number; event_id?: string };
+    const right = rightRaw as { timestamp?: string; event_sequence?: number; event_id?: string };
 
     const timestampOrder = String(left.timestamp ?? "").localeCompare(String(right.timestamp ?? ""));
     if (timestampOrder !== 0) {
       return timestampOrder;
+    }
+    const leftSequence = Number.isFinite(left.event_sequence) ? Number(left.event_sequence) : Number.POSITIVE_INFINITY;
+    const rightSequence = Number.isFinite(right.event_sequence)
+      ? Number(right.event_sequence)
+      : Number.POSITIVE_INFINITY;
+    if (leftSequence !== rightSequence) {
+      return leftSequence - rightSequence;
     }
     return String(left.event_id ?? "").localeCompare(String(right.event_id ?? ""));
   });

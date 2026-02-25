@@ -8,6 +8,7 @@ function buildEvent(index: number): TimelapseEvent {
   const timestamp = new Date(Date.UTC(2020, 0, 1, 0, 0, index)).toISOString();
   return {
     event_id: `evt-${index}`,
+    event_sequence: index,
     timestamp,
     action: "signed",
     treaty_type: index % 2 === 0 ? "MDP" : "ODP",
@@ -68,5 +69,21 @@ describe("deriveNetworkEdges", () => {
 
     expect(removed).toBeLessThanOrEqual(1);
     expect(added).toBeLessThanOrEqual(1);
+  });
+
+  it("treats terminated aliases as terminal actions", () => {
+    const signed = buildEvent(0);
+    const terminated = {
+      ...signed,
+      event_id: "evt-terminated",
+      event_sequence: signed.event_sequence + 1,
+      action: "terminated"
+    };
+
+    const events = [signed, terminated];
+    const indexes = [0, 1];
+    const edges = deriveNetworkEdges(events, indexes, null, 50);
+
+    expect(edges).toHaveLength(0);
   });
 });

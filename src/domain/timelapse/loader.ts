@@ -121,6 +121,9 @@ function sortEventsByTimestamp(events: TimelapseEvent[]): TimelapseEvent[] {
     if (timestampOrder !== 0) {
       return timestampOrder;
     }
+    if (left.event_sequence !== right.event_sequence) {
+      return left.event_sequence - right.event_sequence;
+    }
     return left.event_id.localeCompare(right.event_id);
   });
 }

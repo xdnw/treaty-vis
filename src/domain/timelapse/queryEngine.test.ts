@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildQuerySelectionKey,
+  compareEventChronology,
   compareTimelapseEvents,
   computeSelectionIndexes,
   type TimelapseEventLike,
@@ -10,6 +11,7 @@ import {
 function makeEvent(overrides: Partial<TimelapseEventLike>): TimelapseEventLike {
   return {
     event_id: "evt-a",
+    event_sequence: 0,
     action: "signed",
     treaty_type: "MDP",
     source: "bot",
@@ -50,12 +52,19 @@ function makeQuery(overrides?: Partial<TimelapseQueryLike>): TimelapseQueryLike 
 }
 
 describe("queryEngine compareTimelapseEvents", () => {
-  it("uses stable event-id tie break across inspector and domain sorting", () => {
-    const left = makeEvent({ event_id: "evt-a", timestamp: "2024-01-01T00:00:00.000Z", action: "signed" });
-    const right = makeEvent({ event_id: "evt-b", timestamp: "2024-01-01T00:00:00.000Z", action: "signed" });
+  it("uses stable sequence tie break across inspector and domain sorting", () => {
+    const left = makeEvent({ event_id: "evt-z", event_sequence: 100, timestamp: "2024-01-01T00:00:00.000Z" });
+    const right = makeEvent({ event_id: "evt-a", event_sequence: 101, timestamp: "2024-01-01T00:00:00.000Z" });
 
     expect(compareTimelapseEvents(left, right, "action", "asc")).toBeLessThan(0);
     expect(compareTimelapseEvents(left, right, "action", "desc")).toBeGreaterThan(0);
+  });
+
+  it("compares chronology by sequence before event id at equal timestamps", () => {
+    const left = makeEvent({ event_id: "evt-z", event_sequence: 10, timestamp: "2024-01-01T00:00:00.000Z" });
+    const right = makeEvent({ event_id: "evt-a", event_sequence: 11, timestamp: "2024-01-01T00:00:00.000Z" });
+
+    expect(compareEventChronology(left, right)).toBeLessThan(0);
   });
 });
 
