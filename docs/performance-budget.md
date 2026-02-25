@@ -30,6 +30,11 @@ Derived metrics:
 - `network.worker.applyLag`: `appliedAt - finishedAt`.
 - `network.worker.endToEnd`: `appliedAt - requestedAt`.
 
+Default strategy budget targets:
+- `fa2line.iterations`: default `32` with adaptive caps by component size.
+- `hybrid-backbone.refinementIterations`: default `4` with adaptive per-community caps.
+- Worker incremental active/layout state keys are structural (playhead-agnostic) so adjacent ticks reuse temporal state.
+
 ### Hard Gate
 
 - Treat these budgets as blocking acceptance criteria for network layout changes.

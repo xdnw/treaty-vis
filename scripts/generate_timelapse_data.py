@@ -54,6 +54,7 @@ TERMINAL_ACTION_ALIASES = {
 	"terminated": "ended",
 	"termination": "ended",
 }
+FRAME_INDEX_SCHEMA_VERSION = 1
 
 
 @dataclass
@@ -92,6 +93,10 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--flags-output",
 		default=str(WEB_PUBLIC_DATA_DIR / "treaty_changes_reconciled_flags.msgpack"),
+	)
+	parser.add_argument(
+		"--frame-index-output",
+		default=None,
 	)
 	parser.add_argument(
 		"--top50-mode",
@@ -944,6 +949,78 @@ def summarize(events: list[dict[str, Any]], flags: list[dict[str, Any]], args: a
 	}
 
 
+def build_frame_index(events: list[dict[str, Any]]) -> dict[str, Any]:
+	day_keys: list[str] = []
+	event_end_offset_by_day: list[int] = []
+	active_edge_delta_by_day: list[dict[str, list[int]]] = []
+	edge_dict: list[list[Any]] = []
+
+	active_by_pair: dict[tuple[int, int, str], int] = {}
+	current_day: str | None = None
+	day_add: set[int] = set()
+	day_remove: set[int] = set()
+
+	def flush_day(day: str, end_offset_exclusive: int) -> None:
+		day_keys.append(day)
+		event_end_offset_by_day.append(end_offset_exclusive)
+		active_edge_delta_by_day.append(
+			{
+				"add_edge_ids": sorted(day_add),
+				"remove_edge_ids": sorted(day_remove),
+			}
+		)
+
+	for event_index, event in enumerate(events):
+		day = str(event.get("timestamp") or "")[:10]
+		if not day:
+			continue
+
+		if current_day is None:
+			current_day = day
+		elif day != current_day:
+			flush_day(current_day, event_index)
+			current_day = day
+			day_add = set()
+			day_remove = set()
+
+		pair_min_id = int(event["pair_min_id"])
+		pair_max_id = int(event["pair_max_id"])
+		treaty_type = str(event["treaty_type"])
+		key = (pair_min_id, pair_max_id, treaty_type)
+		action = normalize_action(event.get("action"))
+
+		if action == "signed":
+			edge_id = len(edge_dict)
+			edge_dict.append([event_index, pair_min_id, pair_max_id, treaty_type])
+			previous = active_by_pair.get(key)
+			if previous is not None:
+				if previous in day_add:
+					day_add.discard(previous)
+				else:
+					day_remove.add(previous)
+			active_by_pair[key] = edge_id
+			day_add.add(edge_id)
+		elif action in TERMINAL_ACTIONS:
+			previous = active_by_pair.pop(key, None)
+			if previous is not None:
+				if previous in day_add:
+					day_add.discard(previous)
+				else:
+					day_remove.add(previous)
+
+	if current_day is not None:
+		flush_day(current_day, len(events))
+
+	return {
+		"schema_version": FRAME_INDEX_SCHEMA_VERSION,
+		"day_keys": day_keys,
+		"event_end_offset_by_day": event_end_offset_by_day,
+		"edge_dict": edge_dict,
+		"active_edge_delta_by_day": active_edge_delta_by_day,
+		"top_membership_by_day": {},
+	}
+
+
 def main() -> int:
 	args = parse_args()
 
@@ -1003,6 +1080,15 @@ def main() -> int:
 
 	all_flags = bot_flags + nation_flags + reconcile_flags + extra_flags
 	summary = summarize(reconciled, all_flags, args)
+	default_reconciled_output = Path(WEB_PUBLIC_DATA_DIR / "treaty_changes_reconciled.msgpack").resolve()
+	output_path = Path(args.output).resolve()
+	should_write_frame_index = bool(args.frame_index_output) or output_path == default_reconciled_output
+	frame_index_output = (
+		Path(args.frame_index_output).resolve()
+		if args.frame_index_output
+		else (WEB_PUBLIC_DATA_DIR / "treaty_frame_index_v1.msgpack").resolve()
+	)
+	frame_index = build_frame_index(reconciled) if should_write_frame_index else None
 
 	if args.dry_run:
 		print(f"Dry run complete. Events: {len(reconciled)}")
@@ -1013,11 +1099,15 @@ def main() -> int:
 	write_msgpack(Path(args.output), reconciled)
 	write_msgpack(Path(args.summary_output), summary)
 	write_msgpack(Path(args.flags_output), all_flags)
+	if frame_index is not None:
+		write_msgpack(frame_index_output, frame_index)
 	manifest = refresh_manifest()
 
 	print(f"Wrote reconciled events: {args.output}")
 	print(f"Wrote summary: {args.summary_output}")
 	print(f"Wrote flags: {args.flags_output}")
+	if frame_index is not None:
+		print(f"Wrote frame index: {frame_index_output}")
 	print(f"Updated manifest: {WEB_PUBLIC_DATA_DIR / 'manifest.json'}")
 	print(f"Dataset ID: {manifest.get('datasetId')}")
 	print(f"Events total: {len(reconciled)}")

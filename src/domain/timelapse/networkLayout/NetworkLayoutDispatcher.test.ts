@@ -26,6 +26,25 @@ function buildInput(): NetworkLayoutInput {
   };
 }
 
+function buildInputFromEdges(nodeIds: string[], edges: Array<[string, string]>, previousState?: unknown): NetworkLayoutInput {
+  const adjacencyByNodeId = new Map<string, Set<string>>();
+  for (const nodeId of nodeIds) {
+    adjacencyByNodeId.set(nodeId, new Set<string>());
+  }
+
+  for (const [left, right] of edges) {
+    adjacencyByNodeId.get(left)?.add(right);
+    adjacencyByNodeId.get(right)?.add(left);
+  }
+
+  return {
+    nodeIds,
+    adjacencyByNodeId,
+    temporalKey: "test-key",
+    previousState
+  };
+}
+
 function nodePositionSignature(input: ReturnType<typeof runNetworkLayoutStrategy>): string[] {
   return input.layout.nodeTargets.map((target) => `${target.nodeId}:${target.targetX.toFixed(4)},${target.targetY.toFixed(4)}`);
 }
@@ -55,5 +74,83 @@ describe("NetworkLayoutDispatcher", () => {
     const input = buildInput();
 
     expect(() => runNetworkLayoutStrategy("unknown" as never, input)).toThrow("Unknown strategy");
+  });
+
+  it("preserves fa2 component identity across small membership edits", () => {
+    const first = runNetworkLayoutStrategy(
+      "fa2line",
+      buildInputFromEdges(
+        ["1", "2", "3", "4", "5"],
+        [
+          ["1", "2"],
+          ["2", "3"],
+          ["3", "4"],
+          ["4", "5"]
+        ]
+      )
+    );
+
+    const second = runNetworkLayoutStrategy(
+      "fa2line",
+      buildInputFromEdges(
+        ["1", "2", "3", "4", "5", "6"],
+        [
+          ["1", "2"],
+          ["2", "3"],
+          ["3", "4"],
+          ["4", "5"],
+          ["5", "6"]
+        ],
+        first.metadata?.state
+      )
+    );
+
+    const firstLargest = first.layout.components[0]?.componentId;
+    const secondLargest = second.layout.components[0]?.componentId;
+    expect(firstLargest).toBeDefined();
+    expect(secondLargest).toBeDefined();
+    expect(secondLargest).toBe(firstLargest);
+  });
+
+  it("preserves hybrid community identity across small membership edits", () => {
+    const first = runNetworkLayoutStrategy(
+      "hybrid-backbone",
+      buildInputFromEdges(
+        ["10", "11", "12", "13", "14", "15"],
+        [
+          ["10", "11"],
+          ["11", "12"],
+          ["12", "10"],
+          ["13", "14"],
+          ["14", "15"],
+          ["15", "13"],
+          ["12", "13"]
+        ]
+      )
+    );
+
+    const second = runNetworkLayoutStrategy(
+      "hybrid-backbone",
+      buildInputFromEdges(
+        ["10", "11", "12", "13", "14", "15", "16"],
+        [
+          ["10", "11"],
+          ["11", "12"],
+          ["12", "10"],
+          ["13", "14"],
+          ["14", "15"],
+          ["15", "13"],
+          ["12", "13"],
+          ["15", "16"]
+        ],
+        first.metadata?.state
+      )
+    );
+
+    const firstIds = new Set(first.layout.communities.map((community) => community.communityId));
+    const secondIds = new Set(second.layout.communities.map((community) => community.communityId));
+    const reusedCount = [...secondIds].filter((id) => firstIds.has(id)).length;
+
+    expect(reusedCount).toBeGreaterThan(0);
   });
 });

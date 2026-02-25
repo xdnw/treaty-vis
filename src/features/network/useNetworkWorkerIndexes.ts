@@ -6,7 +6,7 @@ import type { QueryState } from "@/features/filters/filterStore";
 import { markTimelapsePerf } from "@/lib/perf";
 
 type WorkerNetworkIndexes = {
-  edgeEventIndexes: number[];
+  edgeEventIndexes: Uint32Array;
   layout: WorkerNetworkLayout;
 };
 
@@ -75,7 +75,7 @@ export function useNetworkWorkerIndexes(params: {
           finishedAt: response.finishedAt
         });
         setWorkerNetworkIndexes({
-          edgeEventIndexes: Array.from(response.edgeEventIndexes),
+          edgeEventIndexes: response.edgeEventIndexes,
           layout: response.layout
         });
         setWorkerError(null);

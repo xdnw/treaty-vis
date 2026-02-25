@@ -3,6 +3,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { NetworkLayoutStrategy, NetworkLayoutStrategyConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
 import type { QueryState } from "@/features/filters/filterStore";
 
 const selectTimelapseIndexesMock = vi.fn<
@@ -16,7 +17,7 @@ const selectTimelapseNetworkEventIndexesMock = vi.fn<
     query: QueryState,
     playhead: string | null,
     maxEdges: number,
-    strategy: "hybrid-backbone" | "fa2line",
+    strategy: NetworkLayoutStrategy,
     strategyConfig?: Record<string, unknown>
   ) => Promise<{
     edgeEventIndexes: Uint32Array;
@@ -139,14 +140,17 @@ function SelectionProbe({ query, errorHandler }: SelectionProbeProps) {
 type NetworkProbeProps = {
   query: QueryState;
   playhead: string | null;
+  strategy?: NetworkLayoutStrategy;
+  strategyConfig?: NetworkLayoutStrategyConfig;
 };
 
-function NetworkProbe({ query, playhead }: NetworkProbeProps) {
+function NetworkProbe({ query, playhead, strategy = "hybrid-backbone", strategyConfig }: NetworkProbeProps) {
   const { workerEdgeEventIndexes, workerError } = useNetworkWorkerIndexes({
     baseQuery: query,
     playhead,
     maxEdges: 200,
-    strategy: "hybrid-backbone"
+    strategy,
+    strategyConfig
   });
 
   return (
@@ -332,6 +336,47 @@ describe("worker hook stability during refresh", () => {
     });
 
     expect(container.textContent).toContain("error:0");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("forwards strategy and strategyConfig to the worker request", async () => {
+    selectTimelapseNetworkEventIndexesMock.mockResolvedValue({
+      edgeEventIndexes: new Uint32Array([11, 12]),
+      layout: { components: [], communities: [], nodeTargets: [] },
+      startedAt: 40,
+      finishedAt: 45
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    const query = makeQuery({ textQuery: "strategy-forward" });
+    const fa2Config: NetworkLayoutStrategyConfig = {
+      iterations: 48,
+      repulsionStrength: 20
+    };
+
+    await act(async () => {
+      root.render(
+        <NetworkProbe
+          query={query}
+          playhead={"2026-02-26T00:00:00.000Z"}
+          strategy={"fa2line"}
+          strategyConfig={fa2Config}
+        />
+      );
+      await flush();
+      await flush();
+    });
+
+    expect(selectTimelapseNetworkEventIndexesMock).toHaveBeenCalledTimes(1);
+    expect(selectTimelapseNetworkEventIndexesMock.mock.calls[0]?.[3]).toBe("fa2line");
+    expect(selectTimelapseNetworkEventIndexesMock.mock.calls[0]?.[4]).toEqual(fa2Config);
+    expect(container.textContent).toContain("edges:2|error:0");
 
     await act(async () => {
       root.unmount();

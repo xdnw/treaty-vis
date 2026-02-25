@@ -1,16 +1,7 @@
-import { FA2LineLayoutAlgorithm } from "@/domain/timelapse/networkLayout/FA2LineLayoutAlgorithm";
-import { HybridBackboneLayoutAlgorithm } from "@/domain/timelapse/networkLayout/HybridBackboneLayoutAlgorithm";
-import type { INetworkLayoutAlgorithm } from "@/domain/timelapse/networkLayout/INetworkLayoutAlgorithm";
+import { createNetworkLayoutAlgorithmByStrategy } from "@/domain/timelapse/networkLayout/NetworkLayoutStrategyRegistry";
 import type { NetworkLayoutInput, NetworkLayoutOutput, NetworkLayoutStrategy } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
 
-const algorithms: INetworkLayoutAlgorithm[] = [
-  new HybridBackboneLayoutAlgorithm(),
-  new FA2LineLayoutAlgorithm()
-];
-
-const algorithmByStrategy = new Map<NetworkLayoutStrategy, INetworkLayoutAlgorithm>(
-  algorithms.map((algorithm) => [algorithm.strategy, algorithm])
-);
+const algorithmByStrategy = createNetworkLayoutAlgorithmByStrategy();
 
 export function runNetworkLayoutStrategy(strategy: NetworkLayoutStrategy, input: NetworkLayoutInput): NetworkLayoutOutput {
   const algorithm = algorithmByStrategy.get(strategy);

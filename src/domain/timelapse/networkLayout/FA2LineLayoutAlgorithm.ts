@@ -1,5 +1,6 @@
 import type { INetworkLayoutAlgorithm } from "@/domain/timelapse/networkLayout/INetworkLayoutAlgorithm";
 import { resolveNumberConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutConfigUtils";
+import type { NetworkLayoutStrategyDefinition } from "@/domain/timelapse/networkLayout/NetworkLayoutStrategyDefinition";
 import type { NetworkLayoutInput, NetworkLayoutOutput } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
 import type { WorkerCommunityTarget, WorkerComponentTarget, WorkerNodeTarget } from "@/domain/timelapse/workerProtocol";
 
@@ -8,9 +9,17 @@ const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
 type Point = { x: number; y: number };
 
+type ComponentSnapshot = {
+  componentId: string;
+  members: Set<string>;
+  anchorX: number;
+  anchorY: number;
+};
+
 type FA2LineState = {
   anchors: Record<string, Point>;
   nodePositions: Record<string, Point>;
+  components: ComponentSnapshot[];
 };
 
 export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
@@ -18,7 +27,9 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
 
   public run(input: NetworkLayoutInput): NetworkLayoutOutput {
     const previousState = this.asState(input.previousState);
-    const components = this.computeConnectedComponents(input.nodeIds, input.adjacencyByNodeId);
+    const sortedAdjacency = this.buildSortedAdjacency(input.nodeIds, input.adjacencyByNodeId);
+    const componentsRaw = this.computeConnectedComponents(input.nodeIds, sortedAdjacency);
+    const components = this.assignStableComponentIds(componentsRaw, previousState);
 
     const componentTargets: WorkerComponentTarget[] = [];
     const communityTargets: WorkerCommunityTarget[] = [];
@@ -26,14 +37,21 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
 
     const nextState: FA2LineState = {
       anchors: {},
-      nodePositions: {}
+      nodePositions: {},
+      components: []
     };
 
     for (let componentIndex = 0; componentIndex < components.length; componentIndex += 1) {
       const component = components[componentIndex];
-      const componentId = this.buildComponentId(component.nodeIds);
+      const componentId = component.componentId;
       const anchor = this.resolveComponentAnchor(componentId, component.nodeIds.length, componentIndex, previousState);
       nextState.anchors[componentId] = anchor;
+      nextState.components.push({
+        componentId,
+        members: new Set(component.nodeIds),
+        anchorX: anchor.x,
+        anchorY: anchor.y
+      });
 
       componentTargets.push({
         componentId,
@@ -42,7 +60,7 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
         anchorY: anchor.y
       });
 
-      const communityId = `${componentId}:community:0:${component.nodeIds[0] ?? "none"}`;
+      const communityId = `${componentId}:community:0`;
       communityTargets.push({
         communityId,
         componentId,
@@ -52,7 +70,7 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
       });
 
       const initial = this.seedPositions(component.nodeIds, communityId, anchor, previousState);
-      const solved = this.solveComponentPositions(component.nodeIds, input.adjacencyByNodeId, anchor, initial, input);
+      const solved = this.solveComponentPositions(component.nodeIds, sortedAdjacency, anchor, initial, input);
       for (const [nodeId, position] of solved.entries()) {
         nextState.nodePositions[nodeId] = position;
       }
@@ -60,7 +78,7 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
       const lookup = new Set(component.nodeIds);
       for (const nodeId of component.nodeIds) {
         const position = solved.get(nodeId) ?? anchor;
-        const neighbors = input.adjacencyByNodeId.get(nodeId) ?? new Set<string>();
+        const neighbors = sortedAdjacency.get(nodeId) ?? [];
 
         let neighborX = 0;
         let neighborY = 0;
@@ -115,14 +133,66 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
 
   private asState(value: unknown): FA2LineState {
     if (!value || typeof value !== "object") {
-      return { anchors: {}, nodePositions: {} };
+      return { anchors: {}, nodePositions: {}, components: [] };
     }
-    const candidate = value as { anchors?: unknown; nodePositions?: unknown };
+    const candidate = value as { anchors?: unknown; nodePositions?: unknown; components?: unknown };
 
     return {
       anchors: this.toPointRecord(candidate.anchors),
-      nodePositions: this.toPointRecord(candidate.nodePositions)
+      nodePositions: this.toPointRecord(candidate.nodePositions),
+      components: this.toComponentSnapshots(candidate.components)
     };
+  }
+
+  private toComponentSnapshots(value: unknown): ComponentSnapshot[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    const snapshots: ComponentSnapshot[] = [];
+    for (const raw of value) {
+      if (!raw || typeof raw !== "object") {
+        continue;
+      }
+      const candidate = raw as {
+        componentId?: unknown;
+        members?: unknown;
+        anchorX?: unknown;
+        anchorY?: unknown;
+      };
+      if (typeof candidate.componentId !== "string") {
+        continue;
+      }
+      const anchorX = Number(candidate.anchorX);
+      const anchorY = Number(candidate.anchorY);
+      if (!Number.isFinite(anchorX) || !Number.isFinite(anchorY)) {
+        continue;
+      }
+
+      const members = new Set<string>();
+      if (Array.isArray(candidate.members)) {
+        for (const member of candidate.members) {
+          if (typeof member === "string") {
+            members.add(member);
+          }
+        }
+      } else if (candidate.members instanceof Set) {
+        for (const member of candidate.members) {
+          if (typeof member === "string") {
+            members.add(member);
+          }
+        }
+      }
+
+      snapshots.push({
+        componentId: candidate.componentId,
+        members,
+        anchorX,
+        anchorY
+      });
+    }
+
+    return snapshots;
   }
 
   private toPointRecord(value: unknown): Record<string, Point> {
@@ -155,9 +225,28 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
     return hash >>> 0;
   }
 
-  private computeConnectedComponents(
+  private buildSortedAdjacency(
     nodeIds: string[],
     adjacencyByNodeId: Map<string, Set<string>>
+  ): Map<string, string[]> {
+    const sorted = new Map<string, string[]>();
+    for (const nodeId of nodeIds) {
+      const neighbors = adjacencyByNodeId.get(nodeId);
+      if (!neighbors || neighbors.size === 0) {
+        sorted.set(nodeId, []);
+        continue;
+      }
+      sorted.set(
+        nodeId,
+        [...neighbors].sort((left, right) => left.localeCompare(right))
+      );
+    }
+    return sorted;
+  }
+
+  private computeConnectedComponents(
+    nodeIds: string[],
+    sortedAdjacencyByNodeId: Map<string, string[]>
   ): Array<{ nodeIds: string[] }> {
     const visited = new Set<string>();
     const components: Array<{ nodeIds: string[] }> = [];
@@ -175,12 +264,11 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
       while (queue.length > 0) {
         const current = queue.shift()!;
         members.push(current);
-        const neighbors = adjacencyByNodeId.get(current);
-        if (!neighbors) {
+        const neighbors = sortedAdjacencyByNodeId.get(current);
+        if (!neighbors || neighbors.length === 0) {
           continue;
         }
-        const sortedNeighbors = [...neighbors].sort((left, right) => left.localeCompare(right));
-        for (const neighbor of sortedNeighbors) {
+        for (const neighbor of neighbors) {
           if (visited.has(neighbor)) {
             continue;
           }
@@ -200,7 +288,73 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
   }
 
   private buildComponentId(componentNodeIds: string[]): string {
-    return `component:${componentNodeIds[0] ?? "none"}:${componentNodeIds.length}`;
+    const head = componentNodeIds.slice(0, 8).join(",");
+    return `component:${componentNodeIds.length}:${this.hashId(head).toString(36)}`;
+  }
+
+  private assignStableComponentIds(
+    components: Array<{ nodeIds: string[] }>,
+    previousState: FA2LineState
+  ): Array<{ componentId: string; nodeIds: string[] }> {
+    const previous = previousState.components;
+    if (previous.length === 0) {
+      return components.map((component) => ({
+        componentId: this.buildComponentId(component.nodeIds),
+        nodeIds: component.nodeIds
+      }));
+    }
+
+    const claimed = new Set<string>();
+    const assigned = components.map((component) => {
+      const members = new Set(component.nodeIds);
+      let best: ComponentSnapshot | null = null;
+      let bestOverlap = 0;
+      let bestRatio = -1;
+
+      for (const snapshot of previous) {
+        if (claimed.has(snapshot.componentId)) {
+          continue;
+        }
+        let overlap = 0;
+        for (const member of members) {
+          if (snapshot.members.has(member)) {
+            overlap += 1;
+          }
+        }
+        if (overlap === 0) {
+          continue;
+        }
+
+        const ratio = overlap / Math.max(1, Math.max(members.size, snapshot.members.size));
+        if (
+          overlap > bestOverlap ||
+          (overlap === bestOverlap && ratio > bestRatio) ||
+          (overlap === bestOverlap && ratio === bestRatio && best && snapshot.componentId.localeCompare(best.componentId) < 0)
+        ) {
+          best = snapshot;
+          bestOverlap = overlap;
+          bestRatio = ratio;
+        }
+      }
+
+      if (best) {
+        claimed.add(best.componentId);
+        return {
+          componentId: best.componentId,
+          nodeIds: component.nodeIds
+        };
+      }
+
+      return {
+        componentId: this.buildComponentId(component.nodeIds),
+        nodeIds: component.nodeIds
+      };
+    });
+
+    assigned.sort(
+      (left, right) => right.nodeIds.length - left.nodeIds.length || left.componentId.localeCompare(right.componentId)
+    );
+    return assigned;
   }
 
   private resolveComponentAnchor(
@@ -255,7 +409,7 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
 
   private solveComponentPositions(
     nodeIds: string[],
-    adjacencyByNodeId: Map<string, Set<string>>,
+    sortedAdjacencyByNodeId: Map<string, string[]>,
     anchor: Point,
     seeded: Map<string, Point>,
     input: NetworkLayoutInput
@@ -266,8 +420,12 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
     }
 
     const nodeSet = new Set(nodeIds);
-    const defaultIterations = Math.min(90, Math.max(24, Math.floor(Math.sqrt(nodeIds.length) * 10)));
-    const iterations = Math.floor(resolveNumberConfig(input.strategyConfig, "iterations", defaultIterations, 12, 180));
+    const defaultIterations = Math.min(64, Math.max(18, Math.floor(Math.sqrt(nodeIds.length) * 7)));
+    const configuredIterations = Math.floor(
+      resolveNumberConfig(input.strategyConfig, "iterations", defaultIterations, 12, 180)
+    );
+    const adaptiveIterationCap = nodeIds.length >= 800 ? 24 : nodeIds.length >= 500 ? 32 : nodeIds.length >= 250 ? 44 : 64;
+    const iterations = Math.max(12, Math.min(configuredIterations, adaptiveIterationCap));
     const repulsionStrength = resolveNumberConfig(input.strategyConfig, "repulsionStrength", 14, 2, 60);
     const attractionStrength = resolveNumberConfig(input.strategyConfig, "attractionStrength", 0.08, 0.01, 0.4);
     const gravityStrength = resolveNumberConfig(input.strategyConfig, "gravityStrength", 0.02, 0.001, 0.2);
@@ -284,7 +442,7 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
         let forceX = (anchor.x - current.x) * gravityStrength;
         let forceY = (anchor.y - current.y) * gravityStrength;
 
-        const neighbors = adjacencyByNodeId.get(nodeId) ?? new Set<string>();
+        const neighbors = sortedAdjacencyByNodeId.get(nodeId) ?? [];
         for (const neighborId of neighbors) {
           if (!nodeSet.has(neighborId)) {
             continue;
@@ -345,3 +503,26 @@ export class FA2LineLayoutAlgorithm implements INetworkLayoutAlgorithm {
     return positions;
   }
 }
+
+export const FA2_LINE_STRATEGY_DEFINITION: NetworkLayoutStrategyDefinition = {
+  strategy: "fa2line",
+  label: "FA2 Line",
+  fields: [
+    { key: "iterations", label: "Iterations", min: 12, max: 180, step: 1 },
+    { key: "attractionStrength", label: "Attraction", min: 0.01, max: 0.4, step: 0.01 },
+    { key: "repulsionStrength", label: "Repulsion", min: 2, max: 60, step: 1 },
+    { key: "gravityStrength", label: "Gravity", min: 0.001, max: 0.2, step: 0.001 }
+  ],
+  createInitialConfig: () => ({
+    iterations: 32,
+    attractionStrength: 0.08,
+    repulsionStrength: 14,
+    gravityStrength: 0.02
+  }),
+  summarizeConfig: (config) => {
+    const iterations = Number(config.iterations ?? 32);
+    const gravity = Number(config.gravityStrength ?? 0.02);
+    return `iter=${iterations} gravity=${gravity.toFixed(3)}`;
+  },
+  createAlgorithm: () => new FA2LineLayoutAlgorithm()
+};

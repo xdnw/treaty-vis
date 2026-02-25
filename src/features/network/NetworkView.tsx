@@ -347,6 +347,7 @@ export function NetworkView({
   const [atlasReady, setAtlasReady] = useState(false);
   const [framePressureLevel, setFramePressureLevel] = useState<FlagPressureLevel>("none");
   const [layoutRelaxToken, setLayoutRelaxToken] = useState(0);
+  const [isRecalculateHeld, setIsRecalculateHeld] = useState(false);
   const [showStrategyConfig, setShowStrategyConfig] = useState(false);
   const [networkLayoutStrategy, setNetworkLayoutStrategy] = useState<NetworkLayoutStrategy>(
     DEFAULT_NETWORK_LAYOUT_STRATEGY
@@ -554,7 +555,8 @@ export function NetworkView({
   }, [allEvents, playhead]);
 
   const edges = useMemo(() => {
-    const rawEdges = (workerEdgeEventIndexes ?? []).map((eventIndex) => {
+    const eventIndexes = workerEdgeEventIndexes ? Array.from(workerEdgeEventIndexes) : [];
+    const rawEdges = eventIndexes.map((eventIndex) => {
       const event = allEvents[eventIndex];
       return {
         key: `${event.pair_min_id}:${event.pair_max_id}:${event.treaty_type}`,
@@ -623,6 +625,12 @@ export function NetworkView({
     const workerNodeTargetsById = new Map(
       (workerLayout?.nodeTargets ?? []).map((target) => [target.nodeId, target])
     );
+
+    for (const target of workerNodeTargetsById.values()) {
+      if (!nodeMetaById.has(target.nodeId)) {
+        nodeMetaById.set(target.nodeId, { degree: 0 });
+      }
+    }
 
     const addCounterparty = (nodeId: string, otherId: string, otherLabel: string, treatyType: string) => {
       const counterparties =
@@ -915,6 +923,16 @@ export function NetworkView({
     }
     appliedLayoutRelaxTokenRef.current = Math.max(appliedLayoutRelaxTokenRef.current, graph.relaxAppliedToken);
   }, [graph.relaxAppliedToken]);
+
+  useEffect(() => {
+    if (!isRecalculateHeld || graph.nodes.length === 0 || layoutRelaxToken <= 0) {
+      return;
+    }
+    if (graph.relaxAppliedToken < layoutRelaxToken) {
+      return;
+    }
+    setLayoutRelaxToken((current) => current + 1);
+  }, [graph.nodes.length, graph.relaxAppliedToken, isRecalculateHeld, layoutRelaxToken]);
 
   useEffect(() => {
     markTimelapsePerf("network.graph.build", graph.graphBuildMs);
@@ -1497,7 +1515,12 @@ export function NetworkView({
           }));
         }}
         onClearAnchors={() => setAnchoredAllianceIds([])}
-        onRelaxLayout={() => setLayoutRelaxToken((current) => current + 1)}
+        onRecalculateHoldStart={() => {
+          setIsRecalculateHeld(true);
+          setLayoutRelaxToken((current) => current + 1);
+        }}
+        onRecalculateHoldEnd={() => setIsRecalculateHeld(false)}
+        onRecalculateLayout={() => setLayoutRelaxToken((current) => current + 1)}
         onEnterFullscreen={onEnterFullscreen}
         onExitFullscreen={onExitFullscreen}
         scoreStatusRows={scoreStatusRows}

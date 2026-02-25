@@ -96,6 +96,7 @@ type LoaderWorkerPayload = {
   flagAssetsRaw: unknown | null;
   allianceFlagsRaw: unknown | null;
   scoreRanksRaw: unknown | null;
+  frameIndexRaw: unknown | null;
   manifestRaw: unknown | null;
 };
 

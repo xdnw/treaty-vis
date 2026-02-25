@@ -23,8 +23,11 @@ EXPECTED_SCORE_KEYS = {"score", "alliancescore", "totalscore"}
 
 SCORE_SCHEMA_VERSION = 2
 RANK_SCHEMA_VERSION = 2
+FRAME_INDEX_SCHEMA_VERSION = 1
 DEFAULT_QUANTIZATION_SCALE = 1000
 DEFAULT_MAX_SCORE_BYTES = 10 * 1024 * 1024
+DEFAULT_MAX_FRAME_INDEX_BYTES = 25 * 1024 * 1024
+DEFAULT_TOP_MEMBERSHIP_VALUES = (10, 25, 50, 100)
 
 
 def parse_args() -> argparse.Namespace:
@@ -72,6 +75,27 @@ def parse_args() -> argparse.Namespace:
 		type=int,
 		default=DEFAULT_MAX_SCORE_BYTES,
 		help="Fail if v2 score artifact exceeds this many bytes",
+	)
+	parser.add_argument(
+		"--output-frame-index",
+		default=str(WEB_PUBLIC_DATA_DIR / "treaty_frame_index_v1.msgpack"),
+		help="Output MessagePack path for schema-versioned treaty frame index artifact",
+	)
+	parser.add_argument(
+		"--events-input",
+		default=str(WEB_PUBLIC_DATA_DIR / "treaty_changes_reconciled.msgpack"),
+		help="Input MessagePack path for reconciled treaty events used when bootstrapping frame index",
+	)
+	parser.add_argument(
+		"--top-membership-values",
+		default=",".join(str(value) for value in DEFAULT_TOP_MEMBERSHIP_VALUES),
+		help="Comma-separated top-X values to materialize membership rows for (e.g. 10,25,50,100)",
+	)
+	parser.add_argument(
+		"--max-frame-index-bytes",
+		type=int,
+		default=DEFAULT_MAX_FRAME_INDEX_BYTES,
+		help="Fail if frame-index artifact exceeds this many bytes",
 	)
 	parser.add_argument(
 		"--pretty",
@@ -262,18 +286,159 @@ def build_score_and_rank_payloads(
 	return score_payload, ranks_payload, skipped, records_written, rows_seen_total, rows_skipped_total
 
 
+def parse_top_membership_values(raw: str) -> list[int]:
+	values: set[int] = set()
+	for chunk in str(raw).split(","):
+		text = chunk.strip()
+		if not text:
+			continue
+		parsed = int(text)
+		if parsed <= 0:
+			continue
+		values.add(parsed)
+	return sorted(values)
+
+
+def build_top_membership_by_day(ranks_by_day: dict[str, dict[str, int]], top_values: list[int]) -> dict[str, dict[str, list[int]]]:
+	top_membership_by_day: dict[str, dict[str, list[int]]] = {}
+	if not top_values:
+		return top_membership_by_day
+
+	for top_value in top_values:
+		day_membership: dict[str, list[int]] = {}
+		for day, rank_row in ranks_by_day.items():
+			members = [
+				int(alliance_id)
+				for alliance_id, rank in rank_row.items()
+				if int(rank) <= top_value and int(alliance_id) > 0
+			]
+			if members:
+				members.sort()
+				day_membership[day] = members
+		top_membership_by_day[str(top_value)] = day_membership
+
+	return top_membership_by_day
+
+
+def normalize_action(raw: Any) -> str:
+	action = str(raw or "").strip().lower()
+	if action in {"terminated", "termination"}:
+		return "ended"
+	return action
+
+
+def build_frame_index_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+	terminal_actions = {"cancelled", "expired", "ended", "inferred_cancelled"}
+	day_keys: list[str] = []
+	event_end_offset_by_day: list[int] = []
+	active_edge_delta_by_day: list[dict[str, list[int]]] = []
+	edge_dict: list[list[Any]] = []
+	active_by_pair: dict[tuple[int, int, str], int] = {}
+
+	current_day: str | None = None
+	day_add: set[int] = set()
+	day_remove: set[int] = set()
+
+	def flush_day(day: str, end_offset_exclusive: int) -> None:
+		day_keys.append(day)
+		event_end_offset_by_day.append(end_offset_exclusive)
+		active_edge_delta_by_day.append(
+			{
+				"add_edge_ids": sorted(day_add),
+				"remove_edge_ids": sorted(day_remove),
+			}
+		)
+
+	for event_index, event in enumerate(events):
+		day = str(event.get("timestamp") or "")[:10]
+		if not day:
+			continue
+
+		if current_day is None:
+			current_day = day
+		elif day != current_day:
+			flush_day(current_day, event_index)
+			current_day = day
+			day_add = set()
+			day_remove = set()
+
+		pair_min = int(event["pair_min_id"])
+		pair_max = int(event["pair_max_id"])
+		treaty_type = str(event["treaty_type"])
+		key = (pair_min, pair_max, treaty_type)
+		action = normalize_action(event.get("action"))
+
+		if action == "signed":
+			edge_id = len(edge_dict)
+			edge_dict.append([event_index, pair_min, pair_max, treaty_type])
+			previous = active_by_pair.get(key)
+			if previous is not None:
+				if previous in day_add:
+					day_add.discard(previous)
+				else:
+					day_remove.add(previous)
+			active_by_pair[key] = edge_id
+			day_add.add(edge_id)
+		elif action in terminal_actions:
+			previous = active_by_pair.pop(key, None)
+			if previous is not None:
+				if previous in day_add:
+					day_add.discard(previous)
+				else:
+					day_remove.add(previous)
+
+	if current_day is not None:
+		flush_day(current_day, len(events))
+
+	return {
+		"schema_version": FRAME_INDEX_SCHEMA_VERSION,
+		"day_keys": day_keys,
+		"event_end_offset_by_day": event_end_offset_by_day,
+		"edge_dict": edge_dict,
+		"active_edge_delta_by_day": active_edge_delta_by_day,
+		"top_membership_by_day": {},
+	}
+
+
+def load_frame_index(path: Path) -> dict[str, Any] | None:
+	if not path.exists():
+		return None
+	try:
+		payload = msgpack.unpackb(path.read_bytes(), raw=False)
+	except Exception:
+		return None
+	if not isinstance(payload, dict):
+		return None
+	if int(payload.get("schema_version") or -1) != FRAME_INDEX_SCHEMA_VERSION:
+		return None
+	day_keys = payload.get("day_keys")
+	end_offsets = payload.get("event_end_offset_by_day")
+	deltas = payload.get("active_edge_delta_by_day")
+	edges = payload.get("edge_dict")
+	if not isinstance(day_keys, list) or not isinstance(end_offsets, list) or not isinstance(deltas, list) or not isinstance(edges, list):
+		return None
+	if len(day_keys) != len(end_offsets) or len(day_keys) != len(deltas):
+		return None
+	return payload
+
+
 def main() -> int:
 	args = parse_args()
 	if args.quantization_scale <= 0:
 		raise ValueError("--quantization-scale must be > 0")
 	if args.max_score_bytes <= 0:
 		raise ValueError("--max-score-bytes must be > 0")
+	if args.max_frame_index_bytes <= 0:
+		raise ValueError("--max-frame-index-bytes must be > 0")
 
 	alliances_dir = Path(args.alliances_dir).resolve()
 	output_scores = Path(args.output_scores).resolve()
 	if args.output:
 		output_scores = Path(args.output).resolve()
 	output_ranks = Path(args.output_ranks).resolve()
+	output_frame_index = Path(args.output_frame_index).resolve()
+	events_input = Path(args.events_input).resolve()
+	top_membership_values = parse_top_membership_values(args.top_membership_values)
 
 	files, archive_flags = prepare_alliance_archives(
 		alliances_dir=alliances_dir,
@@ -298,11 +463,33 @@ def main() -> int:
 			"Tune quantization or prune source coverage."
 		)
 	ranks_bytes = msgpack.packb(ranks_payload, use_bin_type=True)
+	top_membership_by_day = build_top_membership_by_day(ranks_payload["ranks_by_day"], top_membership_values)
 
 	output_scores.parent.mkdir(parents=True, exist_ok=True)
 	output_scores.write_bytes(scores_bytes)
 	output_ranks.parent.mkdir(parents=True, exist_ok=True)
 	output_ranks.write_bytes(ranks_bytes)
+
+	frame_index_payload = load_frame_index(output_frame_index)
+	if frame_index_payload is None and events_input.exists():
+		events_payload = msgpack.unpackb(events_input.read_bytes(), raw=False)
+		if isinstance(events_payload, list):
+			frame_index_payload = build_frame_index_from_events(events_payload)
+
+	if frame_index_payload is not None:
+		frame_index_payload["top_membership_by_day"] = top_membership_by_day
+		frame_index_bytes = msgpack.packb(frame_index_payload, use_bin_type=True)
+		if len(frame_index_bytes) > args.max_frame_index_bytes:
+			raise ValueError(
+				f"Frame-index artifact too large: {len(frame_index_bytes)} bytes > max {args.max_frame_index_bytes} bytes."
+			)
+		output_frame_index.parent.mkdir(parents=True, exist_ok=True)
+		output_frame_index.write_bytes(frame_index_bytes)
+		print(
+			f"[score] wrote frame index={output_frame_index} ({len(frame_index_bytes)} bytes) "
+			f"with top-membership sets for {len(top_membership_values)} top-X values"
+		)
+ 
 
 	print(
 		f"[score] wrote scores={output_scores} ({len(scores_bytes)} bytes) and ranks={output_ranks} ({len(ranks_bytes)} bytes) "

@@ -294,11 +294,10 @@ export function buildTopXMembershipLookup(
   };
 }
 
-export function buildQuerySelectionKey(query: TimelapseQueryLike): string {
+function buildQueryKeyParts(query: TimelapseQueryLike): string[] {
   return [
     query.time.start ?? "",
     query.time.end ?? "",
-    query.playback.playhead ?? "",
     String(query.focus.allianceId ?? ""),
     query.focus.edgeKey ?? "",
     query.focus.eventId ?? "",
@@ -313,7 +312,20 @@ export function buildQuerySelectionKey(query: TimelapseQueryLike): string {
     query.textQuery.trim().toLowerCase(),
     query.sort.field,
     query.sort.direction
-  ].join("|");
+  ];
+}
+
+export function buildQueryStructuralKey(query: TimelapseQueryLike): string {
+  return buildQueryKeyParts(query).join("|");
+}
+
+export function buildQueryTemporalCursorKey(query: TimelapseQueryLike, playhead?: string | null): string {
+  return [...buildQueryKeyParts(query), playhead ?? query.playback.playhead ?? ""].join("|");
+}
+
+export function buildQuerySelectionKey(query: TimelapseQueryLike): string {
+  // Backward-compatible alias: selection identity is intentionally playhead-agnostic.
+  return buildQueryStructuralKey(query);
 }
 
 export function computeSelectionIndexes(params: {

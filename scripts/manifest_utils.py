@@ -20,7 +20,9 @@ WEB_MANIFEST_REQUIRED_FILES = [
 	"alliance_scores_v2.msgpack",
 ]
 
-WEB_MANIFEST_OPTIONAL_FILES: list[str] = []
+WEB_MANIFEST_OPTIONAL_FILES: list[str] = [
+	"treaty_frame_index_v1.msgpack",
+]
 
 
 def _sha256_file(path: Path) -> str:

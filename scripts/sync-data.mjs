@@ -16,7 +16,7 @@ const requiredFiles = [
   "alliance_scores_v2.msgpack"
 ];
 
-const optionalFiles = [];
+const optionalFiles = ["treaty_frame_index_v1.msgpack"];
 
 async function fileHash(filePath) {
   const data = await fs.readFile(filePath);

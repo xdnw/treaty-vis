@@ -50,6 +50,7 @@ type RawTimelapsePayload = {
   allianceFlagsRaw: unknown | null;
   flagAssetsRaw: unknown | null;
   scoreRanksRaw: unknown | null;
+  frameIndexRaw: unknown | null;
   manifestRaw: unknown | null;
 };
 
@@ -745,7 +746,16 @@ async function loadTimelapseBundleImpl(showFlags: boolean): Promise<TimelapseDat
     }
   }
 
-  const { eventsRaw, indicesRaw, summaryRaw, flagsRaw, allianceFlagsRaw, flagAssetsRaw, scoreRanksRaw, manifestRaw } =
+  const {
+    eventsRaw,
+    indicesRaw,
+    summaryRaw,
+    flagsRaw,
+    allianceFlagsRaw,
+    flagAssetsRaw,
+    scoreRanksRaw,
+    manifestRaw
+  } =
     await loadTimelapsePayloadInWorker(showFlags);
 
   const manifestParsed = manifestRaw ? manifestSchema.safeParse(manifestRaw) : null;

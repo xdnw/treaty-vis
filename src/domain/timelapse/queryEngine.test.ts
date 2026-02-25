@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildQueryStructuralKey,
+  buildQueryTemporalCursorKey,
   buildQuerySelectionKey,
   compareEventChronology,
   compareTimelapseEvents,
@@ -87,6 +89,31 @@ describe("queryEngine computeSelectionIndexes", () => {
     const keyA = buildQuerySelectionKey(query);
     const keyB = buildQuerySelectionKey({ ...query });
     expect(keyA).toBe(keyB);
+  });
+
+  it("keeps structural key stable across neighboring playheads", () => {
+    const query = makeQuery({
+      playback: { playhead: "2024-02-01T00:00:00.000Z" },
+      textQuery: "alpha"
+    });
+
+    const structuralA = buildQueryStructuralKey(query);
+    const structuralB = buildQueryStructuralKey({
+      ...query,
+      playback: { playhead: "2024-02-02T00:00:00.000Z" }
+    });
+
+    expect(structuralA).toBe(structuralB);
+    expect(buildQuerySelectionKey(query)).toBe(structuralA);
+  });
+
+  it("keeps temporal cursor key playhead-aware", () => {
+    const query = makeQuery({ textQuery: "alpha" });
+
+    const temporalA = buildQueryTemporalCursorKey(query, "2024-02-01T00:00:00.000Z");
+    const temporalB = buildQueryTemporalCursorKey(query, "2024-02-02T00:00:00.000Z");
+
+    expect(temporalA).not.toBe(temporalB);
   });
 
   it("filters by text/time/focus and returns sorted indexes", () => {

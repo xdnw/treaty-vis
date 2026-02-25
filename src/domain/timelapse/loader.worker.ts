@@ -7,15 +7,17 @@ import type {
 } from "@/domain/timelapse/workerProtocol";
 import { runNetworkLayoutStrategy } from "@/domain/timelapse/networkLayout/NetworkLayoutDispatcher";
 import type { NetworkLayoutStrategy, NetworkLayoutStrategyConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
+import { treatyFrameIndexV1Schema, type TreatyFrameIndexV1 } from "@/domain/timelapse/schema";
 import {
   buildPulseSeries,
-  buildQuerySelectionKey,
+  buildQueryStructuralKey,
   buildTopXMembershipLookup,
   compareEventChronology,
   computeSelectionIndexes as computeSharedSelectionIndexes,
   keyForEvent,
   selectStableCappedActiveEvents
 } from "@/domain/timelapse/queryEngine";
+import { resolveScoreDay } from "@/domain/timelapse/scoreDay";
 import { decode } from "@msgpack/msgpack";
 
 type LoaderWorkerPayload = Extract<LoaderWorkerResponse, { kind: "load"; ok: true }>["payload"];
@@ -24,6 +26,8 @@ type WorkerLoadedState = {
   payload: LoaderWorkerPayload;
   allEventIndexes: number[];
   includeFlags: boolean;
+  scoreRanksByDay: WorkerScoreRanksByDay | null;
+  frameIndex: WorkerFrameIndexRuntime | null;
 };
 
 type WorkerBasePayload = Omit<LoaderWorkerPayload, "allianceFlagsRaw" | "flagAssetsRaw">;
@@ -49,6 +53,12 @@ type WorkerEvent = {
 
 type WorkerScoreRanksByDay = Record<string, Record<string, number>>;
 
+type WorkerFrameIndexRuntime = {
+  payload: TreatyFrameIndexV1;
+  edgeIdByEventIndex: Map<number, number>;
+  dayIndexByDayKey: Map<string, number>;
+};
+
 const selectionCache = new Map<string, Uint32Array>();
 const pulseCache = new Map<string, WorkerPulsePoint[]>();
 type WorkerNetworkResult = {
@@ -67,6 +77,7 @@ type IncrementalActiveState = {
 const networkCache = new Map<string, WorkerNetworkResult>();
 const networkLayoutStateByKey = new Map<string, unknown>();
 const incrementalActiveStateByKey = new Map<string, IncrementalActiveState>();
+const frameIndexDayCheckpoint = new Map<string, { dayIndex: number; activeEdgeIds: Set<number> }>();
 let loadedState: WorkerLoadedState | null = null;
 const TERMINAL_ACTIONS = new Set(["cancelled", "expired", "ended", "terminated", "termination", "inferred_cancelled"]);
 const BACKWARD_RECOMPUTE_THRESHOLD = 80;
@@ -189,11 +200,20 @@ function buildIndexPayload(events: unknown[]) {
 }
 
 async function loadBasePayload(): Promise<WorkerBasePayload> {
-  const [eventsRaw, summaryRaw, flagsRaw, scoreRanksRaw, manifestRaw] = await Promise.all([
+  const [eventsRaw, summaryRaw, flagsRaw, scoreRanksRaw, frameIndexRaw, manifestRaw] = await Promise.all([
     fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled.msgpack"),
     fetchMsgpack<unknown>("/data/treaty_changes_reconciled_summary.msgpack"),
     fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled_flags.msgpack"),
     fetch("/data/alliance_score_ranks_daily.msgpack")
+      .then(async (response) => {
+        if (!response.ok) {
+          return null;
+        }
+        const body = await response.arrayBuffer();
+        return decode(new Uint8Array(body)) as unknown;
+      })
+      .catch(() => null),
+    fetch("/data/treaty_frame_index_v1.msgpack")
       .then(async (response) => {
         if (!response.ok) {
           return null;
@@ -220,7 +240,47 @@ async function loadBasePayload(): Promise<WorkerBasePayload> {
     summaryRaw,
     flagsRaw,
     scoreRanksRaw,
+    frameIndexRaw,
     manifestRaw
+  };
+}
+
+function normalizeFrameIndex(raw: unknown | null): WorkerFrameIndexRuntime | null {
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = treatyFrameIndexV1Schema.safeParse(raw);
+  if (!parsed.success) {
+    console.warn("[timelapse] treaty_frame_index_v1 invalid; falling back to legacy network scan", parsed.error.message);
+    return null;
+  }
+
+  const payload = parsed.data;
+  if (
+    payload.day_keys.length === 0 ||
+    payload.day_keys.length !== payload.event_end_offset_by_day.length ||
+    payload.day_keys.length !== payload.active_edge_delta_by_day.length
+  ) {
+    console.warn("[timelapse] treaty_frame_index_v1 shape mismatch; falling back to legacy network scan");
+    return null;
+  }
+
+  const edgeIdByEventIndex = new Map<number, number>();
+  for (let edgeId = 0; edgeId < payload.edge_dict.length; edgeId += 1) {
+    const eventIndex = payload.edge_dict[edgeId][0];
+    edgeIdByEventIndex.set(eventIndex, edgeId);
+  }
+
+  const dayIndexByDayKey = new Map<string, number>();
+  for (let dayIndex = 0; dayIndex < payload.day_keys.length; dayIndex += 1) {
+    dayIndexByDayKey.set(payload.day_keys[dayIndex], dayIndex);
+  }
+
+  return {
+    payload,
+    edgeIdByEventIndex,
+    dayIndexByDayKey
   };
 }
 
@@ -299,7 +359,7 @@ async function loadOptionalFlagPayload(): Promise<Pick<LoaderWorkerPayload, "all
 }
 
 function selectionKey(query: WorkerQueryState): string {
-  return buildQuerySelectionKey(query);
+  return buildQueryStructuralKey(query);
 }
 
 function computeSelectionIndexesCached(state: WorkerLoadedState, query: WorkerQueryState): Uint32Array {
@@ -316,7 +376,7 @@ function computeSelectionIndexesCached(state: WorkerLoadedState, query: WorkerQu
   };
 
   const topX = query.filters.topXByScore ?? null;
-  const ranksByDay = normalizeScoreRanksByDay(state.payload.scoreRanksRaw);
+  const ranksByDay = state.scoreRanksByDay;
   const topMembershipLookup =
     topX !== null && topX > 0 && ranksByDay
       ? buildTopXMembershipLookup(ranksByDay, topX)
@@ -404,7 +464,56 @@ function keyForActivePair(event: WorkerEvent): string {
   return keyForEvent(event);
 }
 
-function computeNetworkEdgeEventIndexes(
+function queryWithoutTopX(query: WorkerQueryState): WorkerQueryState {
+  if (query.filters.topXByScore === null) {
+    return query;
+  }
+
+  return {
+    ...query,
+    filters: {
+      ...query.filters,
+      topXByScore: null
+    }
+  };
+}
+
+function topMembershipAtPlayhead(
+  ranksByDay: WorkerScoreRanksByDay | null,
+  topX: number | null,
+  playhead: string | null
+): Set<number> | null {
+  if (!ranksByDay || topX === null || topX <= 0) {
+    return null;
+  }
+
+  const rankDays = Object.keys(ranksByDay).sort((left, right) => left.localeCompare(right));
+  if (rankDays.length === 0) {
+    return null;
+  }
+
+  const resolvedDay = resolveScoreDay(rankDays, playhead);
+  if (!resolvedDay) {
+    return null;
+  }
+
+  const rankRow = ranksByDay[resolvedDay] ?? {};
+  const members = new Set<number>();
+  for (const [allianceIdRaw, rankRaw] of Object.entries(rankRow)) {
+    const allianceId = Number(allianceIdRaw);
+    const rank = Number(rankRaw);
+    if (!Number.isFinite(allianceId) || !Number.isFinite(rank)) {
+      continue;
+    }
+    if (allianceId <= 0 || rank <= 0 || rank > topX) {
+      continue;
+    }
+    members.add(allianceId);
+  }
+  return members;
+}
+
+function computeNetworkEdgeEventIndexesLegacy(
   state: WorkerLoadedState,
   query: WorkerQueryState,
   playhead: string | null,
@@ -420,7 +529,8 @@ function computeNetworkEdgeEventIndexes(
   }
 
   const events = state.payload.eventsRaw as WorkerEvent[];
-  const selectionSignature = `${selectionKey(query)}|network|${strategy}|${configSignature}|${maxEdges}`;
+  const reconstructionQuery = queryWithoutTopX(query);
+  const selectionSignature = `${selectionKey(reconstructionQuery)}|network|${strategy}|${configSignature}|${maxEdges}`;
   const temporalKey = networkTemporalKey(query, maxEdges, strategy, configSignature);
   const previous = incrementalActiveStateByKey.get(temporalKey);
 
@@ -428,7 +538,7 @@ function computeNetworkEdgeEventIndexes(
   if (previous && previous.selectionSignature === selectionSignature) {
     chronologicalIndexes = previous.chronologicalIndexes;
   } else {
-    chronologicalIndexes = [...computeSelectionIndexesCached(state, query)];
+    chronologicalIndexes = [...computeSelectionIndexesCached(state, reconstructionQuery)];
     chronologicalIndexes.sort((leftIndex, rightIndex) => compareEventChronology(events[leftIndex], events[rightIndex]));
   }
 
@@ -516,8 +626,16 @@ function computeNetworkEdgeEventIndexes(
     }
   }
 
-  const activeIndexes = [...active.values()];
-  const keepCount = Math.max(maxEdges, 200);
+  let activeIndexes = [...active.values()];
+  const membership = topMembershipAtPlayhead(state.scoreRanksByDay, query.filters.topXByScore, playhead);
+  if (membership) {
+    activeIndexes = activeIndexes.filter((index) => {
+      const event = events[index];
+      return membership.has(event.from_alliance_id) && membership.has(event.to_alliance_id);
+    });
+  }
+
+  const keepCount = Math.max(maxEdges, Math.min(200, Math.ceil(maxEdges * 1.5)));
   const reducedEvents = selectStableCappedActiveEvents(activeIndexes.map((index) => events[index]), keepCount);
 
   const adjacencyByNodeId = new Map<string, Set<string>>();
@@ -540,6 +658,18 @@ function computeNetworkEdgeEventIndexes(
   for (const nodeId of nodeIdSet) {
     if (!adjacencyByNodeId.has(nodeId)) {
       adjacencyByNodeId.set(nodeId, new Set());
+    }
+  }
+
+  if (membership) {
+    for (const allianceId of membership) {
+      const nodeId = String(allianceId);
+      if (!nodeIdSet.has(nodeId)) {
+        nodeIdSet.add(nodeId);
+      }
+      if (!adjacencyByNodeId.has(nodeId)) {
+        adjacencyByNodeId.set(nodeId, new Set());
+      }
     }
   }
 
@@ -578,6 +708,234 @@ function computeNetworkEdgeEventIndexes(
   return result;
 }
 
+function canUseFrameIndexFastPath(query: WorkerQueryState): boolean {
+  // Fast path currently guarantees parity for broad network queries only.
+  if (query.time.start || query.time.end) {
+    return false;
+  }
+  if (query.focus.allianceId !== null || query.focus.edgeKey || query.focus.eventId) {
+    return false;
+  }
+  if (query.filters.actions.length > 0) {
+    return false;
+  }
+  if (query.filters.treatyTypes.length > 0 || query.filters.sources.length > 0 || query.filters.alliances.length > 0) {
+    return false;
+  }
+  if (!query.filters.includeInferred || !query.filters.includeNoise) {
+    return false;
+  }
+  if (query.filters.evidenceMode !== "all") {
+    return false;
+  }
+  if (query.filters.topXByScore !== null) {
+    return false;
+  }
+  if (query.textQuery.trim().length > 0) {
+    return false;
+  }
+  return true;
+}
+
+function resolveFrameIndexDay(payload: TreatyFrameIndexV1, playhead: string | null): number {
+  if (payload.day_keys.length === 0) {
+    return -1;
+  }
+  if (!playhead) {
+    return payload.day_keys.length - 1;
+  }
+  const target = playhead.slice(0, 10);
+  let lo = 0;
+  let hi = payload.day_keys.length - 1;
+  let best = -1;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (payload.day_keys[mid] <= target) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best;
+}
+
+function activeEdgeIdsAtDayEnd(frameIndex: WorkerFrameIndexRuntime, dayIndex: number): Set<number> {
+  const cacheKey = "global";
+  const cached = frameIndexDayCheckpoint.get(cacheKey);
+  let active = new Set<number>();
+  let startDay = 0;
+
+  if (cached && cached.dayIndex <= dayIndex) {
+    active = new Set(cached.activeEdgeIds);
+    startDay = cached.dayIndex + 1;
+  }
+
+  for (let index = startDay; index <= dayIndex; index += 1) {
+    const delta = frameIndex.payload.active_edge_delta_by_day[index];
+    for (const edgeId of delta.remove_edge_ids) {
+      active.delete(edgeId);
+    }
+    for (const edgeId of delta.add_edge_ids) {
+      active.add(edgeId);
+    }
+  }
+
+  frameIndexDayCheckpoint.set(cacheKey, {
+    dayIndex,
+    activeEdgeIds: new Set(active)
+  });
+  if (frameIndexDayCheckpoint.size > 8) {
+    const first = frameIndexDayCheckpoint.keys().next().value;
+    if (first) {
+      frameIndexDayCheckpoint.delete(first);
+    }
+  }
+
+  return active;
+}
+
+function computeNetworkEdgeEventIndexesFromFrameIndex(
+  state: WorkerLoadedState,
+  query: WorkerQueryState,
+  playhead: string | null,
+  maxEdges: number,
+  strategy: NetworkLayoutStrategy,
+  strategyConfig: NetworkLayoutStrategyConfig | undefined
+): WorkerNetworkResult | null {
+  if (!state.frameIndex || !canUseFrameIndexFastPath(query)) {
+    return null;
+  }
+
+  const frameIndex = state.frameIndex;
+  const payload = frameIndex.payload;
+  const events = state.payload.eventsRaw as WorkerEvent[];
+  if (events.length === 0) {
+    return null;
+  }
+  if (playhead && playhead < events[0].timestamp) {
+    return null;
+  }
+
+  const dayIndex = resolveFrameIndexDay(payload, playhead);
+  if (dayIndex < 0) {
+    return null;
+  }
+
+  const active = dayIndex > 0 ? activeEdgeIdsAtDayEnd(frameIndex, dayIndex - 1) : new Set<number>();
+  const activeByPair = new Map<string, number>();
+  for (const edgeId of active) {
+    const edge = payload.edge_dict[edgeId];
+    const key = `${edge[1]}:${edge[2]}:${edge[3]}`;
+    activeByPair.set(key, edgeId);
+  }
+
+  const dayStartOffset = dayIndex === 0 ? 0 : payload.event_end_offset_by_day[dayIndex - 1];
+  const dayEndOffset = payload.event_end_offset_by_day[dayIndex] ?? events.length;
+  const replayUpperBound = playhead ? playhead : "\uffff";
+  for (let eventIndex = dayStartOffset; eventIndex < dayEndOffset; eventIndex += 1) {
+    const event = events[eventIndex];
+    if (event.timestamp > replayUpperBound) {
+      break;
+    }
+    const pairKey = keyForActivePair(event);
+    if (event.action === "signed") {
+      const edgeId = frameIndex.edgeIdByEventIndex.get(eventIndex);
+      if (edgeId === undefined) {
+        continue;
+      }
+      const previous = activeByPair.get(pairKey);
+      if (previous !== undefined) {
+        active.delete(previous);
+      }
+      activeByPair.set(pairKey, edgeId);
+      active.add(edgeId);
+    } else if (TERMINAL_ACTIONS.has(event.action)) {
+      const previous = activeByPair.get(pairKey);
+      if (previous !== undefined) {
+        active.delete(previous);
+        activeByPair.delete(pairKey);
+      }
+    }
+  }
+
+  const activeIndexes = [...active]
+    .map((edgeId) => payload.edge_dict[edgeId]?.[0])
+    .filter((eventIndex): eventIndex is number => typeof eventIndex === "number");
+
+  const configSignature = strategyConfigSignature(strategyConfig);
+  const temporalKey = `${networkTemporalKey(query, maxEdges, strategy, configSignature)}|fi:${playhead ?? ""}`;
+  const keepCount = Math.max(maxEdges, Math.min(200, Math.ceil(maxEdges * 1.5)));
+  const reducedEvents = selectStableCappedActiveEvents(activeIndexes.map((index) => events[index]), keepCount);
+
+  const adjacencyByNodeId = new Map<string, Set<string>>();
+  const nodeIdSet = new Set<string>();
+  for (const event of reducedEvents) {
+    const left = String(event.from_alliance_id);
+    const right = String(event.to_alliance_id);
+    nodeIdSet.add(left);
+    nodeIdSet.add(right);
+
+    const leftNeighbors = adjacencyByNodeId.get(left) ?? new Set<string>();
+    leftNeighbors.add(right);
+    adjacencyByNodeId.set(left, leftNeighbors);
+
+    const rightNeighbors = adjacencyByNodeId.get(right) ?? new Set<string>();
+    rightNeighbors.add(left);
+    adjacencyByNodeId.set(right, rightNeighbors);
+  }
+
+  for (const nodeId of nodeIdSet) {
+    if (!adjacencyByNodeId.has(nodeId)) {
+      adjacencyByNodeId.set(nodeId, new Set());
+    }
+  }
+
+  const reduced = reducedEvents.map((event) => state.payload.indicesRaw.eventIdToIndex[event.event_id]);
+  const edgeIndexes = Uint32Array.from(reduced);
+  const layoutResult = runNetworkLayoutStrategy(strategy, {
+    nodeIds: [...nodeIdSet],
+    adjacencyByNodeId,
+    temporalKey,
+    previousState: networkLayoutStateByKey.get(temporalKey),
+    strategyConfig
+  });
+  networkLayoutStateByKey.set(temporalKey, layoutResult.metadata?.state);
+  if (networkLayoutStateByKey.size > 40) {
+    const first = networkLayoutStateByKey.keys().next().value;
+    if (first) {
+      networkLayoutStateByKey.delete(first);
+    }
+  }
+
+  return {
+    edgeIndexes,
+    layout: layoutResult.layout
+  };
+}
+
+function computeNetworkEdgeEventIndexes(
+  state: WorkerLoadedState,
+  query: WorkerQueryState,
+  playhead: string | null,
+  maxEdges: number,
+  strategy: NetworkLayoutStrategy,
+  strategyConfig: NetworkLayoutStrategyConfig | undefined
+): WorkerNetworkResult {
+  const fastPath = computeNetworkEdgeEventIndexesFromFrameIndex(
+    state,
+    query,
+    playhead,
+    maxEdges,
+    strategy,
+    strategyConfig
+  );
+  if (fastPath) {
+    return fastPath;
+  }
+  return computeNetworkEdgeEventIndexesLegacy(state, query, playhead, maxEdges, strategy, strategyConfig);
+}
+
 async function ensureLoadedState(includeFlags: boolean): Promise<WorkerLoadedState> {
   if (loadedState && (!includeFlags || loadedState.includeFlags)) {
     return loadedState;
@@ -585,6 +943,8 @@ async function ensureLoadedState(includeFlags: boolean): Promise<WorkerLoadedSta
 
   if (!loadedState) {
     const basePayload = await loadBasePayload();
+    const scoreRanksByDay = normalizeScoreRanksByDay(basePayload.scoreRanksRaw);
+    const frameIndex = normalizeFrameIndex(basePayload.frameIndexRaw);
     const payload: LoaderWorkerPayload = {
       ...basePayload,
       allianceFlagsRaw: null,
@@ -594,12 +954,19 @@ async function ensureLoadedState(includeFlags: boolean): Promise<WorkerLoadedSta
     for (let index = 0; index < payload.eventsRaw.length; index += 1) {
       allEventIndexes[index] = index;
     }
-    loadedState = { payload, allEventIndexes, includeFlags: false };
+    loadedState = {
+      payload,
+      allEventIndexes,
+      includeFlags: false,
+      scoreRanksByDay,
+      frameIndex
+    };
     selectionCache.clear();
     pulseCache.clear();
     networkCache.clear();
     networkLayoutStateByKey.clear();
     incrementalActiveStateByKey.clear();
+    frameIndexDayCheckpoint.clear();
   }
 
   if (includeFlags && loadedState && !loadedState.includeFlags) {

@@ -105,6 +105,31 @@ export const allianceScoreRanksDailySchema = z.object({
   ranks_by_day: z.record(allianceRankDaySchema)
 });
 
+const frameIndexDayKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const frameIndexEdgeEntrySchema = z.tuple([
+  z.coerce.number().int().nonnegative(),
+  z.coerce.number().int().positive(),
+  z.coerce.number().int().positive(),
+  z.string()
+]);
+const frameIndexDayDeltaSchema = z.object({
+  add_edge_ids: z.array(z.coerce.number().int().nonnegative()),
+  remove_edge_ids: z.array(z.coerce.number().int().nonnegative())
+});
+const frameIndexTopMembershipByTopXSchema = z.record(
+  frameIndexDayKeySchema,
+  z.array(z.coerce.number().int().positive())
+);
+
+export const treatyFrameIndexV1Schema = z.object({
+  schema_version: z.literal(1),
+  day_keys: z.array(frameIndexDayKeySchema),
+  event_end_offset_by_day: z.array(z.coerce.number().int().nonnegative()),
+  edge_dict: z.array(frameIndexEdgeEntrySchema),
+  active_edge_delta_by_day: z.array(frameIndexDayDeltaSchema),
+  top_membership_by_day: z.record(frameIndexTopMembershipByTopXSchema)
+});
+
 export type AllianceScoresV2Payload = z.infer<typeof allianceScoresV2Schema>;
 export type AllianceScoresByDay = Record<string, Record<string, number>>;
 export type AllianceScoresRuntime = {
@@ -113,6 +138,9 @@ export type AllianceScoresRuntime = {
   byDay: AllianceScoresByDay;
 };
 export type AllianceScoreRanksByDay = z.infer<typeof allianceScoreRanksDailySchema>["ranks_by_day"];
+export type TreatyFrameIndexV1 = z.infer<typeof treatyFrameIndexV1Schema>;
+export type TreatyFrameEdgeEntry = z.infer<typeof frameIndexEdgeEntrySchema>;
+export type TreatyFrameDayDelta = z.infer<typeof frameIndexDayDeltaSchema>;
 
 export type TimelapseEvent = z.infer<typeof timelapseEventSchema>;
 export type TimelapseSummary = z.infer<typeof summarySchema>;

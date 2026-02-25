@@ -28,7 +28,9 @@ type Props = {
   onToggleStrategyConfig: () => void;
   onStrategyFieldChange: (key: string, value: number) => void;
   onClearAnchors: () => void;
-  onRelaxLayout: () => void;
+  onRecalculateHoldStart: () => void;
+  onRecalculateHoldEnd: () => void;
+  onRecalculateLayout: () => void;
   onEnterFullscreen: () => void;
   onExitFullscreen: () => void;
   scoreStatusRows: ScoreFailureDiagnostic | null;
@@ -52,7 +54,9 @@ export function NetworkViewPanel({
   onToggleStrategyConfig,
   onStrategyFieldChange,
   onClearAnchors,
-  onRelaxLayout,
+  onRecalculateHoldStart,
+  onRecalculateHoldEnd,
+  onRecalculateLayout,
   onEnterFullscreen,
   onExitFullscreen,
   scoreStatusRows,
@@ -132,10 +136,35 @@ export function NetworkViewPanel({
             <button
               type="button"
               className="rounded border border-slate-300 px-1 py-0.5 hover:bg-slate-100"
-              onClick={onRelaxLayout}
+              onPointerDown={(event) => {
+                if (event.button !== 0) {
+                  return;
+                }
+                event.currentTarget.setPointerCapture(event.pointerId);
+                onRecalculateHoldStart();
+              }}
+              onPointerUp={() => {
+                onRecalculateHoldEnd();
+              }}
+              onPointerCancel={() => {
+                onRecalculateHoldEnd();
+              }}
+              onPointerLeave={() => {
+                onRecalculateHoldEnd();
+              }}
+              onBlur={() => {
+                onRecalculateHoldEnd();
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") {
+                  return;
+                }
+                event.preventDefault();
+                onRecalculateLayout();
+              }}
               disabled={graph.nodes.length === 0}
             >
-              Re-pack / Relax
+              Recalculate
             </button>
           </div>
           {showStrategyConfig ? <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-2 text-[11px] text-slate-700">

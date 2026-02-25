@@ -1,6 +1,6 @@
 import type { WorkerNetworkLayout } from "@/domain/timelapse/workerProtocol";
 
-export type NetworkLayoutStrategy = "hybrid-backbone" | "fa2line";
+export type NetworkLayoutStrategy = string;
 
 export type NetworkLayoutStrategyConfig = Record<string, unknown>;
 
