@@ -19,6 +19,7 @@ import {
 import type { NetworkLayoutStrategy, NetworkLayoutStrategyConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
 import { buildTimelapseIndices, type TimelapseIndices } from "@/domain/timelapse/selectors";
 import type { QueryState } from "@/features/filters/filterStore";
+import { dataAssetPath } from "@/lib/assetPaths";
 import type {
   LoaderWorkerRequest,
   LoaderWorkerResponse,
@@ -643,7 +644,7 @@ function manifestCacheIdentity(manifest: TimelapseManifest): string {
 }
 
 async function fetchManifestForHydration(): Promise<TimelapseManifest | null> {
-  const manifestRaw = await fetch("/data/manifest.json")
+  const manifestRaw = await fetch(dataAssetPath("manifest.json"))
     .then(async (response) => {
       if (!response.ok) {
         return null;

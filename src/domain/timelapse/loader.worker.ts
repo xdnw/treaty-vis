@@ -8,6 +8,7 @@ import type {
 import { runNetworkLayoutStrategy } from "@/domain/timelapse/networkLayout/NetworkLayoutDispatcher";
 import type { NetworkLayoutStrategy, NetworkLayoutStrategyConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
 import { treatyFrameIndexV1Schema, type TreatyFrameIndexV1 } from "@/domain/timelapse/schema";
+import { dataAssetPath } from "@/lib/assetPaths";
 import {
   buildPulseSeries,
   buildQueryStructuralKey,
@@ -201,10 +202,10 @@ function buildIndexPayload(events: unknown[]) {
 
 async function loadBasePayload(): Promise<WorkerBasePayload> {
   const [eventsRaw, summaryRaw, flagsRaw, scoreRanksRaw, frameIndexRaw, manifestRaw] = await Promise.all([
-    fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled.msgpack"),
-    fetchMsgpack<unknown>("/data/treaty_changes_reconciled_summary.msgpack"),
-    fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled_flags.msgpack"),
-    fetch("/data/alliance_score_ranks_daily.msgpack")
+    fetchMsgpack<unknown[]>(dataAssetPath("treaty_changes_reconciled.msgpack")),
+    fetchMsgpack<unknown>(dataAssetPath("treaty_changes_reconciled_summary.msgpack")),
+    fetchMsgpack<unknown[]>(dataAssetPath("treaty_changes_reconciled_flags.msgpack")),
+    fetch(dataAssetPath("alliance_score_ranks_daily.msgpack"))
       .then(async (response) => {
         if (!response.ok) {
           return null;
@@ -213,7 +214,7 @@ async function loadBasePayload(): Promise<WorkerBasePayload> {
         return decode(new Uint8Array(body)) as unknown;
       })
       .catch(() => null),
-    fetch("/data/treaty_frame_index_v1.msgpack")
+    fetch(dataAssetPath("treaty_frame_index_v1.msgpack"))
       .then(async (response) => {
         if (!response.ok) {
           return null;
@@ -222,7 +223,7 @@ async function loadBasePayload(): Promise<WorkerBasePayload> {
         return decode(new Uint8Array(body)) as unknown;
       })
       .catch(() => null),
-    fetch("/data/manifest.json")
+    fetch(dataAssetPath("manifest.json"))
       .then(async (response) => {
         if (!response.ok) {
           return null;
@@ -330,7 +331,7 @@ function normalizeScoreRanksByDay(raw: unknown | null): WorkerScoreRanksByDay | 
 
 async function loadOptionalFlagPayload(): Promise<Pick<LoaderWorkerPayload, "allianceFlagsRaw" | "flagAssetsRaw">> {
   const [allianceFlagsRaw, flagAssetsRaw] = await Promise.all([
-    fetch("/data/flags.msgpack")
+    fetch(dataAssetPath("flags.msgpack"))
       .then(async (response) => {
         if (!response.ok) {
           console.warn("[timelapse] Optional flags.msgpack fetch failed in worker", response.status);
@@ -340,7 +341,7 @@ async function loadOptionalFlagPayload(): Promise<Pick<LoaderWorkerPayload, "all
         return decode(new Uint8Array(body)) as unknown;
       })
       .catch(() => null),
-    fetch("/data/flag_assets.msgpack")
+    fetch(dataAssetPath("flag_assets.msgpack"))
       .then(async (response) => {
         if (!response.ok) {
           console.warn("[timelapse] Optional flag_assets.msgpack fetch failed in worker", response.status);

@@ -36,7 +36,7 @@ describe("loader worker layout architecture", () => {
   it("keeps frame-index fast path guarded with legacy fallback", () => {
     const source = readLoaderWorkerSource();
 
-    expect(source).toContain('/data/treaty_frame_index_v1.msgpack');
+    expect(source).toContain('dataAssetPath("treaty_frame_index_v1.msgpack")');
     expect(source).toContain("function computeNetworkEdgeEventIndexesFromFrameIndex(");
     expect(source).toContain("return computeNetworkEdgeEventIndexesLegacy(");
     expect(source).toContain("treatyFrameIndexV1Schema");

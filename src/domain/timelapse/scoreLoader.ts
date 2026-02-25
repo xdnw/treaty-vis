@@ -1,4 +1,5 @@
 import type { AllianceScoresRuntime, TimelapseManifest } from "@/domain/timelapse/schema";
+import { dataAssetPath } from "@/lib/assetPaths";
 import { pushScoreLoadAttempt } from "@/lib/perf";
 
 export type ScoreLoaderState =
@@ -81,7 +82,7 @@ const SCORE_CACHE_DB = "discmcp_score_runtime_cache";
 const SCORE_CACHE_STORE = "scoreRuntime";
 const SCORE_CACHE_VERSION = 1;
 const SCORE_TIMEOUT_MS = 15_000;
-const SCORE_URL = "/data/alliance_scores_v2.msgpack";
+const SCORE_URL = dataAssetPath("alliance_scores_v2.msgpack");
 const SCORE_FILE_KEY = "alliance_scores_v2.msgpack";
 const TERMINAL_STATES = new Set<ScoreLoaderState>([
   "ready",
