@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import csv
+import email.utils
 import hashlib
 import io
 import json
 import math
 import os
 import random
+import socket
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -82,13 +86,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-download-bytes",
         type=int,
-        default=524288,
-        help="Maximum bytes allowed per image download",
+        default=5242880,
+        help="Maximum bytes allowed per image download (default: 5 MiB)",
     )
     parser.add_argument(
         "--max-flags",
         type=int,
-        default=5000,
+        default=10000,
         help="Maximum number of unique normalized flags to keep",
     )
     parser.add_argument(
@@ -112,6 +116,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.5,
         help="Base retry delay in seconds (exponential backoff + jitter)",
+    )
+    parser.add_argument(
+        "--download-concurrency",
+        type=int,
+        default=6,
+        help="Number of parallel worker threads for flag downloads",
     )
     parser.add_argument(
         "--retry-failed",
@@ -362,13 +372,15 @@ def validate_runtime_args(args: argparse.Namespace) -> None:
     if args.download_timeout_seconds <= 0:
         raise RuntimeError("download timeout must be positive")
     if args.max_download_bytes <= 0:
-        raise RuntimeError("max download bytes must be positive")
+        raise RuntimeError("max download bytes must be positive (default: 5242880)")
     if args.max_flags <= 0:
         raise RuntimeError("max flags must be positive")
     if args.max_retries < 0:
         raise RuntimeError("max retries must be >= 0")
     if args.retry_base_delay < 0:
         raise RuntimeError("retry base delay must be >= 0")
+    if args.download_concurrency <= 0:
+        raise RuntimeError("download concurrency must be >= 1")
 
 
 def atomic_write_bytes(path: Path, payload: bytes) -> None:
@@ -528,13 +540,73 @@ def download_image_bytes(url: str, timeout_seconds: float, max_download_bytes: i
 
 
 def is_transient_download_error(exc: Exception) -> bool:
+    if isinstance(exc, urllib.error.HTTPError):
+        code = int(exc.code)
+        return code == 429 or 500 <= code <= 599
+
     if isinstance(exc, TimeoutError):
         return True
+
     if isinstance(exc, urllib.error.URLError):
-        return True
-    if isinstance(exc, urllib.error.HTTPError):
-        return int(exc.code) in {408, 409, 425, 429, 500, 502, 503, 504}
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, urllib.error.HTTPError):
+            return False
+        if isinstance(reason, (TimeoutError, socket.timeout, ConnectionError, OSError)):
+            return True
+        if isinstance(reason, str):
+            lowered = reason.lower()
+            return (
+                "timed out" in lowered
+                or "temporary failure" in lowered
+                or "connection reset" in lowered
+                or "connection refused" in lowered
+                or "name resolution" in lowered
+            )
+        return False
+
     return False
+
+
+def extract_http_status_from_error(exc: Exception) -> int | None:
+    if isinstance(exc, urllib.error.HTTPError):
+        return int(exc.code)
+    if isinstance(exc, urllib.error.URLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, urllib.error.HTTPError):
+            return int(reason.code)
+    return None
+
+
+def extract_retry_after_seconds_from_error(exc: Exception) -> float | None:
+    if not isinstance(exc, urllib.error.HTTPError):
+        return None
+
+    raw_value = ""
+    try:
+        raw_value = str(exc.headers.get("Retry-After") or "").strip()
+    except Exception:
+        raw_value = ""
+
+    if not raw_value:
+        return None
+
+    if raw_value.isdigit():
+        seconds = float(raw_value)
+        return seconds if seconds >= 0 else None
+
+    try:
+        retry_at = email.utils.parsedate_to_datetime(raw_value)
+    except Exception:
+        return None
+    if retry_at is None:
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+
+    delta_seconds = (retry_at - datetime.now(timezone.utc)).total_seconds()
+    if delta_seconds <= 0:
+        return 0.0
+    return delta_seconds
 
 
 def download_with_retries(
@@ -547,18 +619,47 @@ def download_with_retries(
 ) -> tuple[bytes, int | None]:
     attempts_total = max(1, max_retries + 1)
     last_error: Exception | None = None
+    rate_limit_streak = 0
     for attempt in range(attempts_total):
         try:
             return download_image_bytes(url, timeout_seconds=timeout_seconds, max_download_bytes=max_download_bytes)
         except Exception as exc:
             last_error = exc
+            status_code = extract_http_status_from_error(exc)
+            if status_code == 429:
+                rate_limit_streak += 1
+            else:
+                rate_limit_streak = 0
             if attempt >= (attempts_total - 1):
                 break
             if not is_transient_download_error(exc):
                 break
-            base = retry_base_delay * (2**attempt)
-            jitter = random.uniform(0.0, max(retry_base_delay, 0.001))
-            delay = min(base + jitter, 30.0)
+
+            if status_code == 429:
+                retry_hint = extract_retry_after_seconds_from_error(exc)
+                if retry_hint is not None:
+                    base_delay = max(retry_hint, 0.0)
+                    hint_source = "retry-after"
+                else:
+                    base_delay = 60.0
+                    hint_source = "default-60s"
+
+                scale_power = max(0, rate_limit_streak - 1)
+                scaled_delay = base_delay * (2**scale_power)
+                jitter_cap = max(1.0, min(scaled_delay * 0.25, 30.0))
+                jitter = random.uniform(0.0, jitter_cap)
+                delay = min(scaled_delay + jitter, 900.0)
+                print(
+                    "[flags] info: 429 backoff "
+                    f"url={url} retry={attempt + 1}/{attempts_total - 1} "
+                    f"wait={delay:.2f}s streak={rate_limit_streak} source={hint_source}",
+                    file=sys.stderr,
+                )
+            else:
+                base = retry_base_delay * (2**attempt)
+                jitter = random.uniform(0.0, max(retry_base_delay, 0.001))
+                delay = min(base + jitter, 30.0)
+
             if delay > 0:
                 time.sleep(delay)
 
@@ -570,6 +671,9 @@ def normalize_image_bytes(image_bytes: bytes, tile_width: int, tile_height: int)
     assert Image is not None
     try:
         with Image.open(io.BytesIO(image_bytes)) as src:
+            # Always normalize GIFs from frame 0 so animated inputs produce deterministic output.
+            if str(getattr(src, "format", "")).upper() == "GIF" and bool(getattr(src, "is_animated", False)):
+                src.seek(0)
             rgba = src.convert("RGBA")
     except Exception as exc:
         raise RuntimeError(f"decode failed: {exc}") from exc
@@ -596,6 +700,7 @@ def collect_flag_assets(
     cache_dir: Path,
     max_retries: int,
     retry_base_delay: float,
+    download_concurrency: int,
     retry_failed: bool,
     retry_failed_only: bool,
     reset_failures: bool,
@@ -660,6 +765,24 @@ def collect_flag_assets(
 
     queued = [entry for entry in worklist if entry[2]]
     progress = ProgressReporter(label="[flags] image progress", total=len(queued), unit="urls", non_tty_every=100)
+    state_lock = threading.Lock()
+    checkpoint_every = max(10, download_concurrency * 2)
+    state_updates_since_checkpoint = 0
+
+    def checkpoint_state(*, force: bool = False) -> None:
+        nonlocal state_updates_since_checkpoint
+        with state_lock:
+            if force or state_updates_since_checkpoint >= checkpoint_every:
+                persist_download_state(state_file, state)
+                state_updates_since_checkpoint = 0
+
+    def update_url_state(url: str, *, mark_for_checkpoint: bool = True, **kwargs: Any) -> dict[str, Any]:
+        nonlocal state_updates_since_checkpoint
+        with state_lock:
+            updated = upsert_url_state(state=state, url=url, **kwargs)
+            if mark_for_checkpoint:
+                state_updates_since_checkpoint += 1
+            return updated
 
     url_to_hash: dict[str, str] = {}
     hash_to_image: dict[str, Image.Image] = {}
@@ -684,46 +807,43 @@ def collect_flag_assets(
                 skipped_downloaded += 1
             except Exception as exc:
                 hash_failures += 1
-                upsert_url_state(
-                    state=state,
-                    url=url,
+                update_url_state(
+                    url,
                     status="failed",
                     cache_file=cache_path.name,
                     last_error=f"cached decode failed: {exc}",
                 )
-                persist_download_state(state_file, state)
+                checkpoint_state(force=True)
         else:
             skipped_non_retry += 1
 
-    for queue_index, (url, item, _) in enumerate(queued):
-        done = queue_index == (len(queued) - 1)
+    # Reserve attempt/state updates before scheduling to keep retries/resume deterministic.
+    queued_jobs: list[tuple[str, Path, int | None]] = []
+    for url, item, _ in queued:
         cache_path = resolve_cache_path(cache_dir, item, url)
+        update_url_state(
+            url,
+            status="pending",
+            cache_file=cache_path.name,
+            increment_attempts=True,
+        )
+        queued_jobs.append((url, cache_path, item.get("http_status")))
+    checkpoint_state(force=True)
 
+    def process_single_url(url: str, cache_path: Path, existing_http_status: int | None) -> dict[str, Any]:
         if not is_supported_remote_url(url):
-            hash_failures += 1
-            print(f"[flags] warning: skipping unsupported flag url: {url}", file=sys.stderr)
-            upsert_url_state(
-                state=state,
-                url=url,
-                status="failed",
-                cache_file=cache_path.name,
-                last_error="unsupported url scheme",
-            )
-            persist_download_state(state_file, state)
-            progress.step(kept=len(hash_to_image), failed=hash_failures, done=done)
-            continue
+            return {
+                "url": url,
+                "status": "failed",
+                "cache_file": cache_path.name,
+                "error": "unsupported url scheme",
+                "http_status": None,
+            }
 
         try:
-            upsert_url_state(
-                state=state,
-                url=url,
-                status="pending",
-                cache_file=cache_path.name,
-                increment_attempts=True,
-            )
             if cache_path.exists():
                 raw = cache_path.read_bytes()
-                http_status = item.get("http_status")
+                http_status = existing_http_status
             else:
                 raw, http_status = download_with_retries(
                     url=url,
@@ -736,36 +856,78 @@ def collect_flag_assets(
 
             normalized = normalize_image_bytes(raw, tile_width=tile_width, tile_height=tile_height)
             image_hash = hash_normalized_image(normalized)
-            content_sha256 = hashlib.sha256(raw).hexdigest()
+            return {
+                "url": url,
+                "status": "downloaded",
+                "cache_file": cache_path.name,
+                "http_status": int(http_status) if http_status is not None else None,
+                "content_sha256": hashlib.sha256(raw).hexdigest(),
+                "image_hash": image_hash,
+                "normalized": normalized,
+            }
         except Exception as exc:
-            hash_failures += 1
-            print(f"[flags] warning: failed flag download/decode {url}: {exc}", file=sys.stderr)
-            upsert_url_state(
-                state=state,
-                url=url,
-                status="failed",
-                cache_file=cache_path.name,
-                last_error=str(exc),
-            )
-            persist_download_state(state_file, state)
-            progress.step(kept=len(hash_to_image), failed=hash_failures, done=done)
-            continue
+            http_status = extract_http_status_from_error(exc)
+            return {
+                "url": url,
+                "status": "failed",
+                "cache_file": cache_path.name,
+                "error": str(exc),
+                "http_status": http_status,
+            }
 
-        url_to_hash[url] = image_hash
-        if image_hash not in hash_to_image:
-            hash_to_image[image_hash] = normalized
+    completed = 0
+    if queued_jobs:
+        max_workers = min(download_concurrency, len(queued_jobs))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(process_single_url, url, cache_path, existing_http_status)
+                for url, cache_path, existing_http_status in queued_jobs
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                completed += 1
+                done = completed == len(queued_jobs)
 
-        upsert_url_state(
-            state=state,
-            url=url,
-            status="downloaded",
-            cache_file=cache_path.name,
-            content_sha256=content_sha256,
-            http_status=int(http_status) if http_status is not None else None,
-            last_error="",
-        )
-        persist_download_state(state_file, state)
-        progress.step(kept=len(hash_to_image), failed=hash_failures, done=done)
+                result = future.result()
+                url = str(result.get("url") or "")
+                cache_file = str(result.get("cache_file") or "")
+                status = str(result.get("status") or "failed")
+
+                if status != "downloaded":
+                    hash_failures += 1
+                    error_text = str(result.get("error") or "unknown download/decode failure")
+                    if error_text == "unsupported url scheme":
+                        print(f"[flags] warning: skipping unsupported flag url: {url}", file=sys.stderr)
+                    else:
+                        print(f"[flags] warning: failed flag download/decode {url}: {error_text}", file=sys.stderr)
+                    update_url_state(
+                        url,
+                        status="failed",
+                        cache_file=cache_file,
+                        last_error=error_text,
+                        http_status=result.get("http_status"),
+                    )
+                    checkpoint_state()
+                    progress.step(kept=len(hash_to_image), failed=hash_failures, done=done)
+                    continue
+
+                image_hash = str(result["image_hash"])
+                normalized = result["normalized"]
+                url_to_hash[url] = image_hash
+                if image_hash not in hash_to_image:
+                    hash_to_image[image_hash] = normalized
+
+                update_url_state(
+                    url,
+                    status="downloaded",
+                    cache_file=cache_file,
+                    content_sha256=str(result.get("content_sha256") or ""),
+                    http_status=result.get("http_status"),
+                    last_error="",
+                )
+                checkpoint_state()
+                progress.step(kept=len(hash_to_image), failed=hash_failures, done=done)
+
+    checkpoint_state(force=True)
 
     sorted_hashes = sorted(hash_to_image.keys())
     if len(sorted_hashes) > max_flags:
@@ -954,6 +1116,7 @@ def main() -> int:
         cache_dir=cache_dir,
         max_retries=int(args.max_retries),
         retry_base_delay=float(args.retry_base_delay),
+        download_concurrency=int(args.download_concurrency),
         retry_failed=bool(args.retry_failed),
         retry_failed_only=bool(args.retry_failed_only),
         reset_failures=bool(args.reset_failures),
