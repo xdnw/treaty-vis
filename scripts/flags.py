@@ -19,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +45,9 @@ FLAG_KEYS = ("flag", "alliance_flag", "flag_url", "allianceflag")
 EXPECTED_ID_KEYS = {"id", "allianceid"}
 EXPECTED_NAME_KEYS = {"name", "alliancename", "alliance"}
 EXPECTED_FLAG_KEYS = {"flag", "allianceflag", "flagurl"}
+
+DEFAULT_ARCHIVE_CDX_ENDPOINT = "https://web.archive.org/cdx/search/cdx"
+DEFAULT_ARCHIVE_REPLAY_PREFIX = "https://web.archive.org/web"
 
 
 def parse_args() -> argparse.Namespace:
@@ -153,6 +156,68 @@ def parse_args() -> argparse.Namespace:
         "--pretty",
         action="store_true",
         help="Deprecated for binary output; accepted for backward compatibility",
+    )
+    parser.add_argument(
+        "--enable-archive-fallback",
+        action="store_true",
+        help="Enable Wayback archive fallback for failed top-X-eligible event URLs",
+    )
+    parser.add_argument(
+        "--archive-ranks-path",
+        default=str(WEB_PUBLIC_DATA_DIR / "alliance_score_ranks_daily.msgpack"),
+        help="Path to alliance_score_ranks_daily.msgpack used for top-X event gating",
+    )
+    parser.add_argument(
+        "--archive-top-x",
+        type=int,
+        default=50,
+        help="Top-X threshold by event date for archive fallback eligibility",
+    )
+    parser.add_argument(
+        "--archive-cdx-endpoint",
+        default=DEFAULT_ARCHIVE_CDX_ENDPOINT,
+        help="CDX endpoint used for archive fallback lookups",
+    )
+    parser.add_argument(
+        "--archive-replay-prefix",
+        default=DEFAULT_ARCHIVE_REPLAY_PREFIX,
+        help="Replay prefix used for archive fallback downloads",
+    )
+    parser.add_argument(
+        "--archive-window-days",
+        type=int,
+        default=45,
+        help="Initial +/- day window around event date for nearest CDX capture selection",
+    )
+    parser.add_argument(
+        "--archive-window-widen-days",
+        type=int,
+        default=365,
+        help="Optional widened +/- day window when no capture exists in the initial window",
+    )
+    parser.add_argument(
+        "--archive-max-cdx-rows",
+        type=int,
+        default=2000,
+        help="Maximum CDX rows to request per URL/time-bucket query",
+    )
+    parser.add_argument(
+        "--archive-concurrency",
+        type=int,
+        default=2,
+        help="Maximum concurrent archive endpoint requests",
+    )
+    parser.add_argument(
+        "--archive-max-retries",
+        type=int,
+        default=5,
+        help="Maximum retries per archive request",
+    )
+    parser.add_argument(
+        "--archive-retry-base-delay",
+        type=float,
+        default=1.0,
+        help="Base retry delay for archive requests (with stronger 429 handling)",
     )
     return parser.parse_args()
 
@@ -382,6 +447,246 @@ def validate_runtime_args(args: argparse.Namespace) -> None:
         raise RuntimeError("retry base delay must be >= 0")
     if args.download_concurrency <= 0:
         raise RuntimeError("download concurrency must be >= 1")
+    if args.archive_top_x <= 0:
+        raise RuntimeError("archive top-x must be >= 1")
+    if args.archive_window_days <= 0:
+        raise RuntimeError("archive window days must be >= 1")
+    if args.archive_window_widen_days <= 0:
+        raise RuntimeError("archive window widen days must be >= 1")
+    if args.archive_max_cdx_rows <= 0:
+        raise RuntimeError("archive max CDX rows must be >= 1")
+    if args.archive_concurrency <= 0:
+        raise RuntimeError("archive concurrency must be >= 1")
+    if args.archive_max_retries < 0:
+        raise RuntimeError("archive max retries must be >= 0")
+    if args.archive_retry_base_delay < 0:
+        raise RuntimeError("archive retry base delay must be >= 0")
+
+
+def parse_iso8601_utc(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def parse_wayback_timestamp(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if len(text) < 14 or not text[:14].isdigit():
+        return None
+    try:
+        return datetime.strptime(text[:14], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def to_wayback_timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+
+def extract_day_key(timestamp_or_day: str) -> str:
+    text = str(timestamp_or_day or "").strip()
+    return text[:10] if len(text) >= 10 else text
+
+
+def resolve_rank_day(rank_days: list[str], timestamp_or_day: str) -> str | None:
+    if not rank_days:
+        return None
+    target_day = extract_day_key(timestamp_or_day)
+    if not target_day:
+        return rank_days[-1]
+
+    lo = 0
+    hi = len(rank_days) - 1
+    best = -1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if rank_days[mid] <= target_day:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    if best >= 0:
+        return rank_days[best]
+    return rank_days[0]
+
+
+def load_score_ranks_by_day(path: Path) -> dict[str, dict[str, int]]:
+    if not path.exists():
+        raise RuntimeError(f"rank file not found: {path}")
+
+    try:
+        payload = msgpack.unpackb(path.read_bytes(), raw=False)
+    except Exception as exc:
+        raise RuntimeError(f"failed reading rank file {path}: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"invalid rank payload (expected dict): {path}")
+
+    if int(payload.get("schema_version", 0)) != 2:
+        raise RuntimeError(f"unsupported rank payload schema_version in {path}; expected 2")
+
+    rows_raw = payload.get("ranks_by_day")
+    if not isinstance(rows_raw, dict):
+        raise RuntimeError(f"invalid rank payload ranks_by_day in {path}")
+
+    normalized: dict[str, dict[str, int]] = {}
+    for day_key, row_raw in rows_raw.items():
+        day = str(day_key)
+        if not isinstance(row_raw, dict):
+            continue
+        row: dict[str, int] = {}
+        for alliance_key, rank_raw in row_raw.items():
+            try:
+                rank = int(rank_raw)
+            except (TypeError, ValueError):
+                continue
+            if rank <= 0:
+                continue
+            row[str(alliance_key)] = rank
+        if row:
+            normalized[day] = row
+
+    if not normalized:
+        raise RuntimeError(f"rank payload has no usable rank rows: {path}")
+    return normalized
+
+
+def build_archive_fallback_context(
+    events: list[dict[str, Any]],
+    *,
+    enabled: bool,
+    ranks_path: Path,
+    top_x: int,
+) -> dict[str, list[dict[str, Any]]]:
+    if not enabled:
+        return {}
+
+    ranks_by_day = load_score_ranks_by_day(ranks_path)
+    rank_days = sorted(ranks_by_day.keys())
+    by_url: dict[str, list[dict[str, Any]]] = {}
+
+    for event in events:
+        alliance_id = int(event.get("alliance_id") or 0)
+        if alliance_id <= 0:
+            continue
+        event_timestamp = str(event.get("timestamp") or "").strip()
+        if not event_timestamp:
+            continue
+        resolved_day = resolve_rank_day(rank_days, event_timestamp)
+        if not resolved_day:
+            continue
+        rank = int((ranks_by_day.get(resolved_day) or {}).get(str(alliance_id), 0))
+        if rank <= 0 or rank > top_x:
+            continue
+
+        for key in ("raw_flag_url", "raw_previous_flag_url"):
+            raw_url = str(event.get(key) or "").strip()
+            if not raw_url:
+                continue
+            row = {
+                "event_timestamp": event_timestamp,
+                "event_day": extract_day_key(event_timestamp),
+                "alliance_id": alliance_id,
+                "rank_day": resolved_day,
+                "rank": rank,
+            }
+            by_url.setdefault(raw_url, []).append(row)
+
+    for url, rows in by_url.items():
+        rows.sort(key=lambda item: (str(item.get("event_timestamp") or ""), int(item.get("alliance_id") or 0)))
+
+    return by_url
+
+
+def make_cdx_query_url(
+    *,
+    cdx_endpoint: str,
+    original_url: str,
+    from_ts: str,
+    to_ts: str,
+    max_rows: int,
+) -> str:
+    params = {
+        "url": original_url,
+        "from": from_ts,
+        "to": to_ts,
+        "output": "json",
+        "fl": "timestamp,original,statuscode,mimetype,digest,length",
+        "filter": ["statuscode:200"],
+        "limit": str(max_rows),
+    }
+    query = urllib.parse.urlencode(params, doseq=True)
+    return f"{cdx_endpoint}?{query}"
+
+
+def parse_cdx_json_rows(payload_bytes: bytes) -> list[dict[str, str]]:
+    try:
+        parsed = json.loads(payload_bytes.decode("utf-8", errors="replace"))
+    except Exception as exc:
+        raise RuntimeError(f"failed to parse CDX json: {exc}") from exc
+
+    if not isinstance(parsed, list) or not parsed:
+        return []
+
+    header = parsed[0]
+    if not isinstance(header, list):
+        return []
+    columns = [str(item) for item in header]
+    rows: list[dict[str, str]] = []
+
+    for raw_row in parsed[1:]:
+        if not isinstance(raw_row, list):
+            continue
+        row: dict[str, str] = {}
+        for index, col in enumerate(columns):
+            row[col] = str(raw_row[index]) if index < len(raw_row) else ""
+        if row.get("statuscode") != "200":
+            continue
+        if not row.get("timestamp"):
+            continue
+        rows.append(row)
+
+    return rows
+
+
+def nearest_cdx_row(rows: list[dict[str, str]], event_at: datetime) -> dict[str, str] | None:
+    best_row: dict[str, str] | None = None
+    best_key: tuple[int, str, str] | None = None
+    event_seconds = int(event_at.timestamp())
+
+    for row in rows:
+        snap_ts = str(row.get("timestamp") or "")
+        snap_dt = parse_wayback_timestamp(snap_ts)
+        if snap_dt is None:
+            continue
+        delta_seconds = abs(int(snap_dt.timestamp()) - event_seconds)
+        tie_break_original = str(row.get("original") or "")
+        key = (delta_seconds, snap_ts, tie_break_original)
+        if best_key is None or key < best_key:
+            best_key = key
+            best_row = row
+
+    return best_row
+
+
+def build_wayback_replay_candidates(*, replay_prefix: str, timestamp: str, original_url: str) -> list[tuple[str, str]]:
+    encoded_original = urllib.parse.quote(original_url, safe=":/?&=%#@+-._~")
+    base = replay_prefix.rstrip("/")
+    return [
+        ("id_", f"{base}/{timestamp}id_/{encoded_original}"),
+        ("if_", f"{base}/{timestamp}if_/{encoded_original}"),
+        ("plain", f"{base}/{timestamp}/{encoded_original}"),
+    ]
 
 
 def atomic_write_bytes(path: Path, payload: bytes) -> None:
@@ -432,7 +737,7 @@ def load_json_or_default(path: Path, default: Any) -> Any:
 def default_download_state() -> dict[str, Any]:
     now = utc_now_iso()
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at": now,
         "updated_at": now,
         "urls": {},
@@ -446,8 +751,11 @@ def load_download_state(path: Path) -> dict[str, Any]:
 
     if not isinstance(loaded.get("urls"), dict):
         loaded["urls"] = {}
-    if "schema_version" not in loaded:
-        loaded["schema_version"] = 1
+    try:
+        schema_version = int(loaded.get("schema_version", 1))
+    except Exception:
+        schema_version = 1
+    loaded["schema_version"] = max(schema_version, 2)
     if "created_at" not in loaded:
         loaded["created_at"] = utc_now_iso()
     if "updated_at" not in loaded:
@@ -494,6 +802,7 @@ def upsert_url_state(
     content_sha256: str | None = None,
     http_status: int | None = None,
     increment_attempts: bool = False,
+    extra_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     url_states = state.setdefault("urls", {})
     current = url_states.get(url)
@@ -515,6 +824,10 @@ def upsert_url_state(
         next_item["http_status"] = int(http_status)
     elif "http_status" in current:
         next_item["http_status"] = current["http_status"]
+
+    if extra_fields:
+        for key, value in extra_fields.items():
+            next_item[key] = value
 
     url_states[url] = next_item
     return next_item
@@ -710,7 +1023,60 @@ def download_with_retries(
     raise last_error
 
 
-def normalize_image_bytes(image_bytes: bytes, tile_width: int, tile_height: int) -> Image.Image:
+def download_with_retries_archive(
+    *,
+    url: str,
+    timeout_seconds: float,
+    max_download_bytes: int,
+    max_retries: int,
+    retry_base_delay: float,
+) -> tuple[bytes, int | None]:
+    attempts_total = max(1, max_retries + 1)
+    last_error: Exception | None = None
+    rate_limit_streak = 0
+    for attempt in range(attempts_total):
+        try:
+            return download_image_bytes(url, timeout_seconds=timeout_seconds, max_download_bytes=max_download_bytes)
+        except Exception as exc:
+            last_error = exc
+            status_code = extract_http_status_from_error(exc)
+            if status_code == 429:
+                rate_limit_streak += 1
+            else:
+                rate_limit_streak = 0
+
+            if attempt >= (attempts_total - 1):
+                break
+            if not is_transient_download_error(exc):
+                break
+
+            if status_code == 429:
+                retry_hint = extract_retry_after_seconds_from_error(exc)
+                base_delay = max(retry_hint, 0.0) if retry_hint is not None else 120.0
+                scale_power = max(0, rate_limit_streak - 1)
+                scaled_delay = base_delay * (2**scale_power)
+                jitter_cap = max(2.0, min(scaled_delay * 0.30, 60.0))
+                jitter = random.uniform(0.0, jitter_cap)
+                delay = min(scaled_delay + jitter, 1200.0)
+                print(
+                    "[flags] info: archive 429 backoff "
+                    f"url={url} retry={attempt + 1}/{attempts_total - 1} "
+                    f"wait={delay:.2f}s streak={rate_limit_streak}",
+                    file=sys.stderr,
+                )
+            else:
+                base = max(retry_base_delay, 0.1) * (2**attempt)
+                jitter = random.uniform(0.0, max(retry_base_delay * 2.0, 0.25))
+                delay = min(base + jitter, 90.0)
+
+            if delay > 0:
+                time.sleep(delay)
+
+    assert last_error is not None
+    raise last_error
+
+
+def normalize_image_bytes(image_bytes: bytes, tile_width: int, tile_height: int) -> Any:
     assert Image is not None
     try:
         with Image.open(io.BytesIO(image_bytes)) as src:
@@ -726,7 +1092,7 @@ def normalize_image_bytes(image_bytes: bytes, tile_width: int, tile_height: int)
     return normalized
 
 
-def hash_normalized_image(image: Image.Image) -> str:
+def hash_normalized_image(image: Any) -> str:
     digest = hashlib.sha256(image.tobytes()).hexdigest()
     return digest
 
@@ -747,7 +1113,17 @@ def collect_flag_assets(
     retry_failed: bool,
     retry_failed_only: bool,
     reset_failures: bool,
-) -> tuple[dict[str, str], dict[str, Image.Image], dict[str, str]]:
+    archive_enabled: bool,
+    archive_context_by_url: dict[str, list[dict[str, Any]]],
+    archive_cdx_endpoint: str,
+    archive_replay_prefix: str,
+    archive_window_days: int,
+    archive_window_widen_days: int,
+    archive_max_cdx_rows: int,
+    archive_concurrency: int,
+    archive_max_retries: int,
+    archive_retry_base_delay: float,
+) -> tuple[dict[str, str], dict[str, Any], dict[str, str]]:
     url_set: set[str] = set()
     for event in events:
         url = str(event.get("raw_flag_url") or "").strip()
@@ -809,6 +1185,9 @@ def collect_flag_assets(
     queued = [entry for entry in worklist if entry[2]]
     progress = ProgressReporter(label="[flags] image progress", total=len(queued), unit="urls", non_tty_every=100)
     state_lock = threading.Lock()
+    archive_lock = threading.Lock()
+    archive_semaphore = threading.Semaphore(max(1, archive_concurrency))
+    cdx_resolution_cache: dict[str, dict[str, Any] | None] = {}
     checkpoint_every = max(10, download_concurrency * 2)
     state_updates_since_checkpoint = 0
 
@@ -828,10 +1207,156 @@ def collect_flag_assets(
             return updated
 
     url_to_hash: dict[str, str] = {}
-    hash_to_image: dict[str, Image.Image] = {}
+    hash_to_image: dict[str, Any] = {}
     hash_failures = 0
     skipped_downloaded = 0
     skipped_non_retry = 0
+    archive_attempts = 0
+    archive_resolutions = 0
+    archive_downloaded = 0
+
+    def fetch_cdx_nearest_capture(
+        *,
+        url: str,
+        event_context: dict[str, Any],
+        window_days: int,
+    ) -> dict[str, Any] | None:
+        event_timestamp = str(event_context.get("event_timestamp") or "")
+        event_dt = parse_iso8601_utc(event_timestamp)
+        if event_dt is None:
+            return None
+        bucket = event_dt.strftime("%Y-%m")
+        cache_key = f"{url}|{bucket}|{window_days}"
+
+        with archive_lock:
+            if cache_key in cdx_resolution_cache:
+                return cdx_resolution_cache[cache_key]
+
+        start_ts = to_wayback_timestamp(event_dt - timedelta(days=window_days))
+        end_ts = to_wayback_timestamp(event_dt + timedelta(days=window_days))
+        query_url = make_cdx_query_url(
+            cdx_endpoint=archive_cdx_endpoint,
+            original_url=url,
+            from_ts=start_ts,
+            to_ts=end_ts,
+            max_rows=archive_max_cdx_rows,
+        )
+
+        try:
+            with archive_semaphore:
+                payload, _ = download_with_retries_archive(
+                    url=query_url,
+                    timeout_seconds=timeout_seconds,
+                    max_download_bytes=max(2 * 1024 * 1024, min(max_download_bytes, 8 * 1024 * 1024)),
+                    max_retries=archive_max_retries,
+                    retry_base_delay=archive_retry_base_delay,
+                )
+            rows = parse_cdx_json_rows(payload)
+            nearest = nearest_cdx_row(rows, event_dt)
+            if nearest is None:
+                resolved = None
+            else:
+                resolved = {
+                    "window_days": window_days,
+                    "query_url": query_url,
+                    "capture": nearest,
+                }
+        except Exception as exc:
+            resolved = {
+                "window_days": window_days,
+                "query_url": query_url,
+                "error": str(exc),
+                "capture": None,
+            }
+
+        with archive_lock:
+            cdx_resolution_cache[cache_key] = resolved
+        return resolved
+
+    def resolve_archive_candidates(url: str) -> dict[str, Any] | None:
+        contexts = archive_context_by_url.get(url) or []
+        if not contexts:
+            return None
+
+        for event_context in contexts:
+            windows = [archive_window_days]
+            if archive_window_widen_days > archive_window_days:
+                windows.append(archive_window_widen_days)
+
+            for window_days in windows:
+                cdx_result = fetch_cdx_nearest_capture(
+                    url=url,
+                    event_context=event_context,
+                    window_days=window_days,
+                )
+                if not cdx_result:
+                    continue
+                capture = cdx_result.get("capture")
+                if not isinstance(capture, dict):
+                    continue
+
+                capture_timestamp = str(capture.get("timestamp") or "")
+                capture_original = str(capture.get("original") or url)
+                if not capture_timestamp:
+                    continue
+
+                replay_candidates = build_wayback_replay_candidates(
+                    replay_prefix=archive_replay_prefix,
+                    timestamp=capture_timestamp,
+                    original_url=capture_original,
+                )
+                return {
+                    "event_context": event_context,
+                    "cdx": cdx_result,
+                    "capture": capture,
+                    "replay_candidates": replay_candidates,
+                }
+
+        return None
+
+    def try_download_candidates(
+        *,
+        candidates: list[tuple[str, str]],
+        use_archive_retry: bool,
+    ) -> dict[str, Any]:
+        if not candidates:
+            raise RuntimeError("no candidates available")
+
+        last_error: Exception | None = None
+        for mode, candidate_url in candidates:
+            try:
+                if use_archive_retry:
+                    with archive_semaphore:
+                        raw, http_status = download_with_retries_archive(
+                            url=candidate_url,
+                            timeout_seconds=timeout_seconds,
+                            max_download_bytes=max_download_bytes,
+                            max_retries=archive_max_retries,
+                            retry_base_delay=archive_retry_base_delay,
+                        )
+                else:
+                    raw, http_status = download_with_retries(
+                        url=candidate_url,
+                        timeout_seconds=timeout_seconds,
+                        max_download_bytes=max_download_bytes,
+                        max_retries=max_retries,
+                        retry_base_delay=retry_base_delay,
+                    )
+
+                normalized = normalize_image_bytes(raw, tile_width=tile_width, tile_height=tile_height)
+                return {
+                    "raw": raw,
+                    "http_status": http_status,
+                    "selected_url": candidate_url,
+                    "selected_mode": mode,
+                    "normalized": normalized,
+                }
+            except Exception as exc:
+                last_error = exc
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("download candidates exhausted")
 
     # Prime cached downloaded URLs so event mapping stays complete on resumed runs.
     for url, item, include in worklist:
@@ -874,6 +1399,7 @@ def collect_flag_assets(
     checkpoint_state(force=True)
 
     def process_single_url(url: str, cache_path: Path, existing_http_status: int | None) -> dict[str, Any]:
+        archive_attempted_for_url = False
         if not is_supported_remote_url(url):
             return {
                 "url": url,
@@ -881,45 +1407,102 @@ def collect_flag_assets(
                 "cache_file": cache_path.name,
                 "error": "unsupported url scheme",
                 "http_status": None,
+                "extra_fields": {"archive_attempted": False, "archive_used": False},
             }
 
         try:
             if cache_path.exists():
                 raw = cache_path.read_bytes()
                 http_status = existing_http_status
+                selected_url = url
+                selected_mode = "cached"
+                normalized = normalize_image_bytes(raw, tile_width=tile_width, tile_height=tile_height)
+                extra_fields = {
+                    "download_source": "cache",
+                    "selected_url": selected_url,
+                    "archive_attempted": False,
+                }
             else:
-                download_candidates = build_download_url_candidates(url)
-                last_error: Exception | None = None
-                raw = b""
-                http_status = None
-                for candidate_index, candidate_url in enumerate(download_candidates):
-                    try:
-                        raw, http_status = download_with_retries(
-                            url=candidate_url,
-                            timeout_seconds=timeout_seconds,
-                            max_download_bytes=max_download_bytes,
-                            max_retries=max_retries,
-                            retry_base_delay=retry_base_delay,
-                        )
-                        break
-                    except Exception as exc:
-                        last_error = exc
-                        if candidate_index < (len(download_candidates) - 1):
-                            print(
-                                f"[flags] info: trying fallback url for {url}: {download_candidates[candidate_index + 1]}",
-                                file=sys.stderr,
-                            )
-                            continue
-                        raise
+                direct_candidates = [("direct", candidate) for candidate in build_download_url_candidates(url)]
+                archive_error: Exception | None = None
+
+                try:
+                    direct_result = try_download_candidates(candidates=direct_candidates, use_archive_retry=False)
+                    raw = bytes(direct_result["raw"])
+                    http_status = direct_result.get("http_status")
+                    selected_url = str(direct_result.get("selected_url") or url)
+                    selected_mode = str(direct_result.get("selected_mode") or "direct")
+                    normalized = direct_result["normalized"]
+                    extra_fields = {
+                        "download_source": "direct",
+                        "selected_url": selected_url,
+                        "archive_attempted": False,
+                        "archive_used": False,
+                    }
+                except Exception as direct_error:
+                    if archive_enabled and url in archive_context_by_url:
+                        archive_attempted_for_url = True
+                        archive_result = resolve_archive_candidates(url)
+                        if archive_result and archive_result.get("replay_candidates"):
+                            replay_candidates = [
+                                (str(mode), str(candidate_url))
+                                for mode, candidate_url in archive_result["replay_candidates"]
+                            ]
+                            try:
+                                archive_download = try_download_candidates(
+                                    candidates=replay_candidates,
+                                    use_archive_retry=True,
+                                )
+                                raw = bytes(archive_download["raw"])
+                                http_status = archive_download.get("http_status")
+                                selected_url = str(archive_download.get("selected_url") or url)
+                                selected_mode = str(archive_download.get("selected_mode") or "id_")
+                                normalized = archive_download["normalized"]
+                                capture = archive_result.get("capture") or {}
+                                event_context = archive_result.get("event_context") or {}
+                                cdx_meta = archive_result.get("cdx") or {}
+                                extra_fields = {
+                                    "download_source": "archive",
+                                    "selected_url": selected_url,
+                                    "archive_attempted": True,
+                                    "archive_used": True,
+                                    "archive_event_day": str(event_context.get("event_day") or ""),
+                                    "archive_event_timestamp": str(event_context.get("event_timestamp") or ""),
+                                    "archive_alliance_id": int(event_context.get("alliance_id") or 0),
+                                    "archive_rank_day": str(event_context.get("rank_day") or ""),
+                                    "archive_rank": int(event_context.get("rank") or 0),
+                                    "archive_window_days": int(cdx_meta.get("window_days") or 0),
+                                    "archive_cdx_query_url": str(cdx_meta.get("query_url") or ""),
+                                    "archive_capture_timestamp": str(capture.get("timestamp") or ""),
+                                    "archive_capture_original": str(capture.get("original") or ""),
+                                    "archive_capture_statuscode": str(capture.get("statuscode") or ""),
+                                    "archive_capture_mimetype": str(capture.get("mimetype") or ""),
+                                    "archive_replay_mode": selected_mode,
+                                }
+                            except Exception as exc:
+                                archive_error = exc
+                        elif archive_result and archive_result.get("cdx") and (archive_result["cdx"].get("error")):
+                            archive_error = RuntimeError(str(archive_result["cdx"].get("error") or "archive cdx failed"))
+                        else:
+                            archive_error = RuntimeError("archive cdx found no bounded capture")
+
+                    if archive_error is not None:
+                        raise RuntimeError(f"direct failed: {direct_error}; archive failed: {archive_error}") from archive_error
+                    if archive_attempted_for_url:
+                        raise RuntimeError(f"direct failed: {direct_error}; archive unavailable") from direct_error
+                    raise direct_error
 
                 if not raw:
-                    if last_error is not None:
-                        raise last_error
                     raise RuntimeError("empty download")
 
                 atomic_write_bytes(cache_path, raw)
 
-            normalized = normalize_image_bytes(raw, tile_width=tile_width, tile_height=tile_height)
+                if archive_attempted_for_url and not bool(extra_fields.get("archive_attempted")):
+                    extra_fields["archive_attempted"] = True
+
+                if archive_attempted_for_url and not bool(extra_fields.get("archive_used")):
+                    extra_fields["archive_used"] = False
+
             image_hash = hash_normalized_image(normalized)
             return {
                 "url": url,
@@ -929,6 +1512,7 @@ def collect_flag_assets(
                 "content_sha256": hashlib.sha256(raw).hexdigest(),
                 "image_hash": image_hash,
                 "normalized": normalized,
+                "extra_fields": extra_fields,
             }
         except Exception as exc:
             http_status = extract_http_status_from_error(exc)
@@ -938,6 +1522,10 @@ def collect_flag_assets(
                 "cache_file": cache_path.name,
                 "error": str(exc),
                 "http_status": http_status,
+                "extra_fields": {
+                    "archive_attempted": archive_attempted_for_url,
+                    "archive_used": False,
+                },
             }
 
     completed = 0
@@ -970,6 +1558,7 @@ def collect_flag_assets(
                         cache_file=cache_file,
                         last_error=error_text,
                         http_status=result.get("http_status"),
+                        extra_fields=result.get("extra_fields") if isinstance(result.get("extra_fields"), dict) else None,
                     )
                     checkpoint_state()
                     progress.step(kept=len(hash_to_image), failed=hash_failures, done=done)
@@ -988,9 +1577,17 @@ def collect_flag_assets(
                     content_sha256=str(result.get("content_sha256") or ""),
                     http_status=result.get("http_status"),
                     last_error="",
+                    extra_fields=result.get("extra_fields") if isinstance(result.get("extra_fields"), dict) else None,
                 )
+                if bool((result.get("extra_fields") or {}).get("archive_attempted")):
+                    archive_attempts += 1
+                if bool((result.get("extra_fields") or {}).get("archive_used")):
+                    archive_downloaded += 1
                 checkpoint_state()
                 progress.step(kept=len(hash_to_image), failed=hash_failures, done=done)
+
+    with archive_lock:
+        archive_resolutions = len(cdx_resolution_cache)
 
     checkpoint_state(force=True)
 
@@ -1011,7 +1608,9 @@ def collect_flag_assets(
         f"stale_repairs={stale_repairs}, "
         f"skipped_downloaded={skipped_downloaded}, "
         f"skipped_non_retry={skipped_non_retry}, "
-        f"unique={len(sorted_hashes)}, failures={hash_failures}",
+        f"unique={len(sorted_hashes)}, failures={hash_failures}, "
+        f"archive_attempts={archive_attempts}, archive_used={archive_downloaded}, "
+        f"archive_cdx_cached={archive_resolutions}",
         file=sys.stderr,
     )
 
@@ -1053,12 +1652,12 @@ def build_runtime_events(
 
 
 def build_flag_atlas(
-    hash_to_image: dict[str, Image.Image],
+    hash_to_image: dict[str, Any],
     hash_to_key: dict[str, str],
     *,
     tile_width: int,
     tile_height: int,
-) -> tuple[Image.Image, dict[str, Any], dict[str, dict[str, Any]]]:
+) -> tuple[Any, dict[str, Any], dict[str, dict[str, Any]]]:
     assert Image is not None
 
     key_to_hash: dict[str, str] = {key: image_hash for image_hash, key in hash_to_key.items()}
@@ -1106,7 +1705,7 @@ def write_outputs(
     atlas_webp_output_path: Path,
     atlas_png_output_path: Path,
     runtime_events: list[dict[str, Any]],
-    atlas: Image.Image,
+    atlas: Any,
     atlas_meta: dict[str, Any],
     assets: dict[str, dict[str, Any]],
 ) -> None:
@@ -1170,6 +1769,26 @@ def main() -> int:
     files.sort(key=lambda p: (parse_day_from_filename(p), p.name))
 
     raw_events = build_flag_events(files)
+
+    archive_context_by_url: dict[str, list[dict[str, Any]]] = {}
+    if args.enable_archive_fallback:
+        ranks_path = Path(args.archive_ranks_path).resolve()
+        try:
+            archive_context_by_url = build_archive_fallback_context(
+                raw_events,
+                enabled=True,
+                ranks_path=ranks_path,
+                top_x=int(args.archive_top_x),
+            )
+            print(
+                "[flags] info: archive fallback enabled "
+                f"top_x={int(args.archive_top_x)} eligible_urls={len(archive_context_by_url)} ranks_path={ranks_path}",
+                file=sys.stderr,
+            )
+        except Exception as exc:
+            print(f"[flags] warning: disabling archive fallback: {exc}", file=sys.stderr)
+            archive_context_by_url = {}
+
     url_to_hash, hash_to_image, hash_to_key = collect_flag_assets(
         raw_events,
         tile_width=int(args.tile_width),
@@ -1185,6 +1804,16 @@ def main() -> int:
         retry_failed=bool(args.retry_failed),
         retry_failed_only=bool(args.retry_failed_only),
         reset_failures=bool(args.reset_failures),
+        archive_enabled=bool(args.enable_archive_fallback and archive_context_by_url),
+        archive_context_by_url=archive_context_by_url,
+        archive_cdx_endpoint=str(args.archive_cdx_endpoint),
+        archive_replay_prefix=str(args.archive_replay_prefix),
+        archive_window_days=int(args.archive_window_days),
+        archive_window_widen_days=int(args.archive_window_widen_days),
+        archive_max_cdx_rows=int(args.archive_max_cdx_rows),
+        archive_concurrency=int(args.archive_concurrency),
+        archive_max_retries=int(args.archive_max_retries),
+        archive_retry_base_delay=float(args.archive_retry_base_delay),
     )
     runtime_events = build_runtime_events(raw_events, url_to_hash=url_to_hash, hash_to_key=hash_to_key)
     atlas, atlas_meta, assets = build_flag_atlas(
