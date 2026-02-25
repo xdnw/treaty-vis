@@ -6,11 +6,13 @@ import type {
 } from "@/domain/timelapse/networkLayout/NetworkLayoutStrategyDefinition";
 import type { INetworkLayoutAlgorithm } from "@/domain/timelapse/networkLayout/INetworkLayoutAlgorithm";
 import type { NetworkLayoutStrategy, NetworkLayoutStrategyConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
-import { CLEAN_TEMPORAL_STRATEGY_DEFINITION } from "./CleanTemporal";
+import { BALANCED_TEMPORAL_STRATEGY_DEFINITION } from "./BalancedTemporal";
+import { STRICT_TEMPORAL_STRATEGY_DEFINITION } from "./StrictTemporal";
 
 export const NETWORK_LAYOUT_STRATEGY_DEFINITIONS: NetworkLayoutStrategyDefinition[] = [
   HYBRID_BACKBONE_STRATEGY_DEFINITION,
-  CLEAN_TEMPORAL_STRATEGY_DEFINITION,
+  BALANCED_TEMPORAL_STRATEGY_DEFINITION,
+  STRICT_TEMPORAL_STRATEGY_DEFINITION,
   FA2_LINE_STRATEGY_DEFINITION
 ];
 

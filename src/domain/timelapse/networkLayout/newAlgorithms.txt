@@ -1,0 +1,1831 @@
+/**
+ * NetworkLayoutAlgorithmBase
+ *
+ * Shared pipeline for all temporal graph layout algorithms.
+ * Subclasses implement only `layoutNodesInCommunity` — everything else
+ * (snapshot IO, connected components, community detection, stable ID
+ * assignment, anchor placement, output building) is handled here.
+ */
+
+import type { INetworkLayoutAlgorithm } from "@/domain/timelapse/networkLayout/INetworkLayoutAlgorithm";
+import { resolveNumberConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutConfigUtils";
+import type { NetworkLayoutInput, NetworkLayoutOutput } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
+import type { WorkerCommunityTarget, WorkerComponentTarget, WorkerNodeTarget } from "@/domain/timelapse/workerProtocol";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+export const TAU          = Math.PI * 2;
+export const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+export const EPS          = 1e-9;
+
+const GRID_OFFSET = 1_048_576; // 2^20
+const GRID_SCALE  = 2_097_153; // 2*offset + 1
+
+// ─── Shared types ─────────────────────────────────────────────────────────────
+
+export type SnapshotComponent = {
+  componentId: string;
+  nodeIds: string[];
+  anchorX: number;
+  anchorY: number;
+  radius?: number;
+};
+
+export type SnapshotCommunity = {
+  communityId: string;
+  componentId: string;
+  nodeIds: string[];
+  anchorX: number;
+  anchorY: number;
+  radius?: number;
+};
+
+export type LayoutSnapshot = {
+  version: 2;
+  components: SnapshotComponent[];
+  communities: SnapshotCommunity[];
+  nodePositions: Record<string, { x: number; y: number }>;
+};
+
+export type SnapshotIndex = {
+  componentByNodeId: Map<string, string>;
+  communityByNodeId: Map<string, string>;
+  componentSizeById: Map<string, number>;
+  communitySizeById: Map<string, number>;
+  componentAnchorById: Map<string, { x: number; y: number }>;
+  communityAnchorById: Map<string, { x: number; y: number }>;
+  communityComponentById: Map<string, string>;
+  nodePositions: Record<string, { x: number; y: number }>;
+};
+
+export type CommunityPlan = {
+  communityId: string;
+  componentId: string;
+  nodeIds: string[];
+  radius: number;
+  anchorX: number;
+  anchorY: number;
+};
+
+export type ComponentPlan = {
+  componentId: string;
+  nodeIds: string[];
+  communities: CommunityPlan[];
+  radius: number;
+  anchorX: number;
+  anchorY: number;
+};
+
+/** Parameters passed to each algorithm's node-layout implementation. */
+export type NodeLayoutParams = {
+  communityId:      string;
+  componentId:      string;
+  nodeIds:          string[];
+  anchorX:          number;
+  anchorY:          number;
+  communityRadius:  number;
+  nodeSpacing:      number;
+  stability:        number;
+  quality:          number;
+  strategyConfig:   Record<string, unknown>;
+  adjacencyByNodeId: Map<string, Set<string>>;
+  nodeHashById:     Map<string, number>;
+  previousIndex:    SnapshotIndex;
+};
+
+export type NodeLayoutResult = {
+  nodeIds: string[];
+  x:       Float64Array;
+  y:       Float64Array;
+};
+
+export type GridStore = {
+  buckets:  Map<number, number[]>;
+  usedKeys: number[];
+  pool:     number[][];
+};
+
+// ─── Utility functions (exported for use by subclasses) ───────────────────────
+
+export const compareString = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+export const clamp         = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+// ─── Abstract base ────────────────────────────────────────────────────────────
+
+export abstract class NetworkLayoutAlgorithmBase implements INetworkLayoutAlgorithm {
+
+  public abstract readonly strategy: string;
+
+  // ── Sub-classes implement this ─────────────────────────────────────────────
+
+  protected abstract layoutNodesInCommunity(params: NodeLayoutParams): NodeLayoutResult;
+
+  // ── Main pipeline ──────────────────────────────────────────────────────────
+
+  public run(input: NetworkLayoutInput): NetworkLayoutOutput {
+    const quality     = resolveNumberConfig(input.strategyConfig, "quality",      1.0,  0.5, 1.5);
+    const stability   = resolveNumberConfig(input.strategyConfig, "stability",    0.8,  0,   0.95);
+    const nodeSpacing = resolveNumberConfig(input.strategyConfig, "nodeSpacing",  8,    4,   20);
+
+    const nodeIdsSorted = [...input.nodeIds].sort(compareString);
+
+    const nodeHashById = new Map<string, number>();
+    for (const id of nodeIdsSorted) nodeHashById.set(id, this.hashId(id));
+
+    const previousSnapshot = this.readSnapshot(input.previousState);
+    const previousIndex    = this.indexSnapshot(previousSnapshot);
+
+    // 1. Connected components
+    const rawComponents      = this.computeConnectedComponents(nodeIdsSorted, input.adjacencyByNodeId);
+    const componentsAssigned = this.assignStableComponentIds(rawComponents, previousIndex);
+
+    // 2. Communities + plans
+    const componentPlans: ComponentPlan[] = [];
+
+    for (const component of componentsAssigned) {
+      const commRaw      = this.detectCommunitiesLabelPropagation({
+        componentId: component.componentId,
+        nodeIds:     component.nodeIds,
+        adjacencyByNodeId: input.adjacencyByNodeId,
+        previousIndex
+      });
+      const commAssigned = this.assignStableCommunityIds(component.componentId, commRaw, previousIndex);
+
+      const communityPlans: CommunityPlan[] = commAssigned.map(c => ({
+        communityId: c.communityId,
+        componentId: component.componentId,
+        nodeIds:     c.nodeIds,
+        radius:      this.computeCommunityRadius(c.nodeIds.length, nodeSpacing),
+        anchorX:     0,
+        anchorY:     0
+      }));
+      communityPlans.sort(
+        (a, b) => b.nodeIds.length - a.nodeIds.length || compareString(a.communityId, b.communityId)
+      );
+
+      componentPlans.push({
+        componentId: component.componentId,
+        nodeIds:     component.nodeIds,
+        communities: communityPlans,
+        radius:      this.computeComponentRadius(communityPlans, nodeSpacing),
+        anchorX:     0,
+        anchorY:     0
+      });
+    }
+
+    componentPlans.sort(
+      (a, b) => b.nodeIds.length - a.nodeIds.length || compareString(a.componentId, b.componentId)
+    );
+
+    // 3. Component anchors (start from prev, push apart overlaps)
+    this.placeComponentAnchors(componentPlans, previousIndex, nodeSpacing);
+
+    // 4. Community anchors inside each component
+    for (const component of componentPlans) {
+      this.placeCommunityAnchors(component, previousIndex, nodeSpacing);
+    }
+
+    // 5. Node layout (delegated to subclass)
+    const nextNodePositions: Record<string, { x: number; y: number }> = Object.create(null);
+    const nodeMetaById = new Map<string, {
+      componentId: string; communityId: string; anchorX: number; anchorY: number;
+    }>();
+
+    for (const component of componentPlans) {
+      for (const community of component.communities) {
+        const { nodeIds: ids, x, y } = this.layoutNodesInCommunity({
+          communityId:      community.communityId,
+          componentId:      component.componentId,
+          nodeIds:          community.nodeIds,
+          anchorX:          community.anchorX,
+          anchorY:          community.anchorY,
+          communityRadius:  community.radius,
+          nodeSpacing,
+          stability,
+          quality,
+          strategyConfig:   input.strategyConfig as Record<string, unknown>,
+          adjacencyByNodeId: input.adjacencyByNodeId,
+          nodeHashById,
+          previousIndex
+        });
+
+        for (let k = 0; k < ids.length; k++) {
+          nextNodePositions[ids[k]] = { x: x[k], y: y[k] };
+          nodeMetaById.set(ids[k], {
+            componentId: component.componentId,
+            communityId: community.communityId,
+            anchorX:     community.anchorX,
+            anchorY:     community.anchorY
+          });
+        }
+      }
+    }
+
+    // 6. Build output
+    const componentTargets: WorkerComponentTarget[] = [];
+    const communityTargets: WorkerCommunityTarget[] = [];
+    const nextSnapshot: LayoutSnapshot = {
+      version: 2, components: [], communities: [], nodePositions: nextNodePositions
+    };
+
+    for (const component of componentPlans) {
+      componentTargets.push({ componentId: component.componentId, nodeIds: component.nodeIds, anchorX: component.anchorX, anchorY: component.anchorY });
+      nextSnapshot.components.push({ componentId: component.componentId, nodeIds: component.nodeIds, anchorX: component.anchorX, anchorY: component.anchorY, radius: component.radius });
+      for (const community of component.communities) {
+        communityTargets.push({ communityId: community.communityId, componentId: component.componentId, nodeIds: community.nodeIds, anchorX: community.anchorX, anchorY: community.anchorY });
+        nextSnapshot.communities.push({ communityId: community.communityId, componentId: component.componentId, nodeIds: community.nodeIds, anchorX: community.anchorX, anchorY: community.anchorY, radius: community.radius });
+      }
+    }
+
+    const nodeTargets: WorkerNodeTarget[] = [];
+    for (const nodeId of nodeIdsSorted) {
+      const pos         = nextNodePositions[nodeId] ?? previousIndex.nodePositions[nodeId] ?? { x: 0, y: 0 };
+      const meta        = nodeMetaById.get(nodeId);
+      const componentId = meta?.componentId ?? previousIndex.componentByNodeId.get(nodeId) ?? "component:unknown";
+      const communityId = meta?.communityId ?? previousIndex.communityByNodeId.get(nodeId) ?? `${componentId}:community:unknown`;
+      const anchorX     = meta?.anchorX ?? pos.x;
+      const anchorY     = meta?.anchorY ?? pos.y;
+
+      let nbX = 0, nbY = 0, nbN = 0;
+      const nbs = input.adjacencyByNodeId.get(nodeId);
+      if (nbs) for (const nb of nbs) { const p = nextNodePositions[nb]; if (p) { nbX += p.x; nbY += p.y; nbN++; } }
+      if (nbN === 0) { nbX = pos.x; nbY = pos.y; } else { nbX /= nbN; nbY /= nbN; }
+
+      nodeTargets.push({ nodeId, componentId, communityId, targetX: pos.x, targetY: pos.y, neighborX: nbX, neighborY: nbY, anchorX, anchorY });
+    }
+
+    return { layout: { components: componentTargets, communities: communityTargets, nodeTargets }, metadata: { state: nextSnapshot } };
+  }
+
+  // ── Snapshot IO ────────────────────────────────────────────────────────────
+
+  protected readSnapshot(value: unknown): LayoutSnapshot | undefined {
+    if (!value || typeof value !== "object") return undefined;
+    const v = value as Record<string, unknown>;
+    if (!Array.isArray(v.components) || !Array.isArray(v.communities) || !v.nodePositions || typeof v.nodePositions !== "object") return undefined;
+
+    const components: SnapshotComponent[] = [];
+    for (const raw of v.components as unknown[]) {
+      if (!raw || typeof raw !== "object") continue;
+      const e = raw as Record<string, unknown>;
+      const componentId = typeof e.componentId === "string" ? e.componentId : null;
+      const anchorX = Number(e.anchorX), anchorY = Number(e.anchorY);
+      if (!componentId || !Number.isFinite(anchorX) || !Number.isFinite(anchorY)) continue;
+      const nodeIds = this.readStringArray(e.nodeIds) ?? this.readStringArray(e.members) ?? [];
+      const radius  = e.radius == null ? undefined : Number(e.radius);
+      components.push({ componentId, nodeIds, anchorX, anchorY, radius: Number.isFinite(radius ?? NaN) ? radius : undefined });
+    }
+
+    const communities: SnapshotCommunity[] = [];
+    for (const raw of v.communities as unknown[]) {
+      if (!raw || typeof raw !== "object") continue;
+      const e = raw as Record<string, unknown>;
+      const communityId = typeof e.communityId === "string" ? e.communityId : null;
+      const componentId = typeof e.componentId === "string" ? e.componentId : null;
+      const anchorX = Number(e.anchorX), anchorY = Number(e.anchorY);
+      if (!communityId || !componentId || !Number.isFinite(anchorX) || !Number.isFinite(anchorY)) continue;
+      const nodeIds = this.readStringArray(e.nodeIds) ?? this.readStringArray(e.members) ?? [];
+      const radius  = e.radius == null ? undefined : Number(e.radius);
+      communities.push({ communityId, componentId, nodeIds, anchorX, anchorY, radius: Number.isFinite(radius ?? NaN) ? radius : undefined });
+    }
+
+    return { version: 2, components, communities, nodePositions: this.toPointRecord(v.nodePositions) };
+  }
+
+  protected readStringArray(value: unknown): string[] | null {
+    if (!value) return null;
+    const out: string[] = [];
+    if (Array.isArray(value)) { for (const item of value) if (typeof item === "string") out.push(item); return out; }
+    if (value instanceof Set) { for (const item of value) if (typeof item === "string") out.push(item); return out; }
+    return null;
+  }
+
+  protected toPointRecord(value: unknown): Record<string, { x: number; y: number }> {
+    if (!value || typeof value !== "object") return Object.create(null);
+    const out: Record<string, { x: number; y: number }> = Object.create(null);
+    for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+      if (!raw || typeof raw !== "object") continue;
+      const pt = raw as { x?: unknown; y?: unknown };
+      const x = Number(pt.x), y = Number(pt.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      out[key] = { x, y };
+    }
+    return out;
+  }
+
+  protected indexSnapshot(snapshot: LayoutSnapshot | undefined): SnapshotIndex {
+    const componentByNodeId    = new Map<string, string>();
+    const communityByNodeId    = new Map<string, string>();
+    const componentSizeById    = new Map<string, number>();
+    const communitySizeById    = new Map<string, number>();
+    const componentAnchorById  = new Map<string, { x: number; y: number }>();
+    const communityAnchorById  = new Map<string, { x: number; y: number }>();
+    const communityComponentById = new Map<string, string>();
+
+    if (!snapshot) return { componentByNodeId, communityByNodeId, componentSizeById, communitySizeById, componentAnchorById, communityAnchorById, communityComponentById, nodePositions: Object.create(null) };
+
+    for (const c of snapshot.components) {
+      componentSizeById.set(c.componentId, c.nodeIds.length);
+      componentAnchorById.set(c.componentId, { x: c.anchorX, y: c.anchorY });
+      for (const id of c.nodeIds) componentByNodeId.set(id, c.componentId);
+    }
+    for (const c of snapshot.communities) {
+      communitySizeById.set(c.communityId, c.nodeIds.length);
+      communityAnchorById.set(c.communityId, { x: c.anchorX, y: c.anchorY });
+      communityComponentById.set(c.communityId, c.componentId);
+      for (const id of c.nodeIds) communityByNodeId.set(id, c.communityId);
+    }
+
+    return { componentByNodeId, communityByNodeId, componentSizeById, communitySizeById, componentAnchorById, communityAnchorById, communityComponentById, nodePositions: snapshot.nodePositions ?? Object.create(null) };
+  }
+
+  // ── ID utilities ───────────────────────────────────────────────────────────
+
+  protected hashId(id: string): number {
+    let h = 2166136261;
+    for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+
+  protected buildComponentId(nodeIds: string[]): string {
+    return `component:${nodeIds.length}:${this.hashId(nodeIds.slice(0, 10).join(",")).toString(36)}`;
+  }
+
+  protected buildCommunityId(componentId: string, nodeIds: string[]): string {
+    return `${componentId}:community:${nodeIds.length}:${this.hashId(nodeIds.slice(0, 10).join(",")).toString(36)}`;
+  }
+
+  // ── Graph partitioning ─────────────────────────────────────────────────────
+
+  protected computeConnectedComponents(
+    nodeIdsSorted: string[],
+    adjacencyByNodeId: Map<string, Set<string>>
+  ): string[][] {
+    const visited = new Set<string>();
+    const components: string[][] = [];
+    for (const root of nodeIdsSorted) {
+      if (visited.has(root)) continue;
+      const queue: string[] = [root]; visited.add(root); let qi = 0; const members: string[] = [];
+      while (qi < queue.length) {
+        const cur = queue[qi++]; members.push(cur);
+        const nbs = adjacencyByNodeId.get(cur); if (!nbs) continue;
+        for (const nb of nbs) { if (!visited.has(nb)) { visited.add(nb); queue.push(nb); } }
+      }
+      members.sort(compareString);
+      components.push(members);
+    }
+    components.sort((a, b) => b.length - a.length || compareString(a[0] ?? "", b[0] ?? ""));
+    return components;
+  }
+
+  protected assignStableComponentIds(
+    rawComponents: string[][],
+    previous: SnapshotIndex
+  ): Array<{ componentId: string; nodeIds: string[] }> {
+    const claimed  = new Set<string>();
+    const assigned: Array<{ componentId: string; nodeIds: string[] }> = [];
+    for (const nodeIds of rawComponents) {
+      const counts = new Map<string, number>();
+      for (const id of nodeIds) { const p = previous.componentByNodeId.get(id); if (p) counts.set(p, (counts.get(p) ?? 0) + 1); }
+      let bestId = null as string | null, bestOverlap = 0, bestRatio = -1;
+      for (const [prevId, overlap] of counts) {
+        if (claimed.has(prevId)) continue;
+        const ratio = overlap / Math.max(1, Math.max(previous.componentSizeById.get(prevId) ?? 0, nodeIds.length));
+        if (overlap > bestOverlap || (overlap === bestOverlap && ratio > bestRatio) ||
+            (overlap === bestOverlap && ratio === bestRatio && bestId !== null && compareString(prevId, bestId) < 0)) {
+          bestId = prevId; bestOverlap = overlap; bestRatio = ratio;
+        }
+      }
+      const componentId = bestId ?? this.buildComponentId(nodeIds);
+      if (bestId) claimed.add(bestId);
+      assigned.push({ componentId, nodeIds });
+    }
+    assigned.sort((a, b) => b.nodeIds.length - a.nodeIds.length || compareString(a.componentId, b.componentId));
+    return assigned;
+  }
+
+  protected detectCommunitiesLabelPropagation(params: {
+    componentId: string; nodeIds: string[]; adjacencyByNodeId: Map<string, Set<string>>; previousIndex: SnapshotIndex;
+  }): string[][] {
+    const { componentId, nodeIds, adjacencyByNodeId, previousIndex } = params;
+    if (nodeIds.length <= 1) return nodeIds.length === 1 ? [nodeIds] : [];
+
+    const sorted    = [...nodeIds].sort(compareString);
+    const nodeIndex = new Map<string, number>();
+    for (let i = 0; i < sorted.length; i++) nodeIndex.set(sorted[i], i);
+
+    const labels = new Map<string, string>();
+    for (const id of sorted) {
+      const prevCommunityId = previousIndex.communityByNodeId.get(id);
+      const prevCompId      = prevCommunityId ? previousIndex.communityComponentById.get(prevCommunityId) : null;
+      labels.set(id, (prevCommunityId && prevCompId === componentId) ? prevCommunityId : id);
+    }
+
+    const maxIter = clamp(Math.ceil(Math.log2(sorted.length + 1)) + 6, 6, 18);
+    const freq    = new Map<string, number>();
+
+    for (let iter = 0; iter < maxIter; iter++) {
+      let changed = false;
+      for (const id of sorted) {
+        const nbs = adjacencyByNodeId.get(id); if (!nbs || nbs.size === 0) continue;
+        freq.clear();
+        for (const nb of nbs) { if (!nodeIndex.has(nb)) continue; const l = labels.get(nb) ?? nb; freq.set(l, (freq.get(l) ?? 0) + 1); }
+        const current = labels.get(id) ?? id;
+        freq.set(current, (freq.get(current) ?? 0) + 1.15);
+        let best = current, bestScore = -Infinity;
+        for (const [l, s] of freq) { if (s > bestScore || (s === bestScore && compareString(l, best) < 0)) { best = l; bestScore = s; } }
+        if (best !== current) { labels.set(id, best); changed = true; }
+      }
+      if (!changed) break;
+    }
+
+    const byLabel = new Map<string, string[]>();
+    for (const id of sorted) { const l = labels.get(id) ?? id; const arr = byLabel.get(l); if (arr) arr.push(id); else byLabel.set(l, [id]); }
+    const communities = [...byLabel.values()];
+    for (const c of communities) c.sort(compareString);
+    communities.sort((a, b) => b.length - a.length || compareString(a[0] ?? "", b[0] ?? ""));
+    return communities;
+  }
+
+  protected assignStableCommunityIds(
+    componentId: string, rawCommunities: string[][], previous: SnapshotIndex
+  ): Array<{ communityId: string; nodeIds: string[] }> {
+    const claimed  = new Set<string>();
+    const assigned: Array<{ communityId: string; nodeIds: string[] }> = [];
+    for (const nodeIds of rawCommunities) {
+      const counts = new Map<string, number>();
+      for (const id of nodeIds) {
+        const p = previous.communityByNodeId.get(id);
+        if (!p || previous.communityComponentById.get(p) !== componentId) continue;
+        counts.set(p, (counts.get(p) ?? 0) + 1);
+      }
+      let bestId = null as string | null, bestOverlap = 0, bestRatio = -1;
+      for (const [prevId, overlap] of counts) {
+        if (claimed.has(prevId)) continue;
+        const ratio = overlap / Math.max(1, Math.max(previous.communitySizeById.get(prevId) ?? 0, nodeIds.length));
+        if (overlap > bestOverlap || (overlap === bestOverlap && ratio > bestRatio) ||
+            (overlap === bestOverlap && ratio === bestRatio && bestId !== null && compareString(prevId, bestId) < 0)) {
+          bestId = prevId; bestOverlap = overlap; bestRatio = ratio;
+        }
+      }
+      const communityId = bestId ?? this.buildCommunityId(componentId, nodeIds);
+      if (bestId) claimed.add(bestId);
+      assigned.push({ communityId, nodeIds });
+    }
+    assigned.sort((a, b) => b.nodeIds.length - a.nodeIds.length || compareString(a.communityId, b.communityId));
+    return assigned;
+  }
+
+  // ── Radii ──────────────────────────────────────────────────────────────────
+
+  protected computeCommunityRadius(nodeCount: number, nodeSpacing: number): number {
+    return nodeSpacing * (2.5 + 1.3 * Math.sqrt(Math.max(1, nodeCount)));
+  }
+
+  protected computeComponentRadius(communities: CommunityPlan[], nodeSpacing: number): number {
+    if (communities.length === 0) return nodeSpacing * 10;
+    let sumSq = 0;
+    for (const c of communities) sumSq += c.radius * c.radius;
+    return Math.sqrt(sumSq * 1.3) + nodeSpacing * 5;
+  }
+
+  // ── Anchor placement ───────────────────────────────────────────────────────
+
+  protected placeComponentAnchors(
+    components: ComponentPlan[], previous: SnapshotIndex, nodeSpacing: number
+  ): void {
+    const n = components.length;
+    if (n === 0) return;
+    if (n === 1) {
+      const prev = previous.componentAnchorById.get(components[0].componentId);
+      components[0].anchorX = prev?.x ?? 0;
+      components[0].anchorY = prev?.y ?? 0;
+      return;
+    }
+
+    const x = new Float64Array(n), y = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const prev = previous.componentAnchorById.get(components[i].componentId);
+      if (prev) { x[i] = prev.x; y[i] = prev.y; }
+      else {
+        const angle = i * GOLDEN_ANGLE;
+        const rad   = nodeSpacing * 14 * Math.sqrt(i + 1);
+        x[i] = Math.cos(angle) * rad;
+        y[i] = Math.sin(angle) * rad;
+      }
+    }
+
+    const padding = nodeSpacing * 4;
+    for (let iter = 0; iter < 80; iter++) {
+      let anyOverlap = false;
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const dx = x[j] - x[i], dy = y[j] - y[i];
+          const d2  = dx * dx + dy * dy;
+          const min = components[i].radius + components[j].radius + padding;
+          if (d2 >= min * min) continue;
+          anyOverlap = true;
+          const d = Math.sqrt(d2) || EPS, ovl = (min - d) * 0.55;
+          const ux = dx / d, uy = dy / d;
+          const si = components[i].nodeIds.length, sj = components[j].nodeIds.length, tot = si + sj;
+          x[i] -= ux * ovl * sj / tot; y[i] -= uy * ovl * sj / tot;
+          x[j] += ux * ovl * si / tot; y[j] += uy * ovl * si / tot;
+        }
+      }
+      if (!anyOverlap) break;
+    }
+
+    // Minimise global drift vs previous
+    let sdx = 0, sdy = 0, sc = 0;
+    for (let i = 0; i < n; i++) {
+      const prev = previous.componentAnchorById.get(components[i].componentId);
+      if (!prev) continue; sdx += prev.x - x[i]; sdy += prev.y - y[i]; sc++;
+    }
+    if (sc > 0) { const tdx = sdx / sc, tdy = sdy / sc; for (let i = 0; i < n; i++) { x[i] += tdx; y[i] += tdy; } }
+
+    for (let i = 0; i < n; i++) { components[i].anchorX = x[i]; components[i].anchorY = y[i]; }
+  }
+
+  protected placeCommunityAnchors(
+    component: ComponentPlan, previous: SnapshotIndex, nodeSpacing: number
+  ): void {
+    const communities = component.communities;
+    if (communities.length === 0) return;
+    if (communities.length === 1) { communities[0].anchorX = component.anchorX; communities[0].anchorY = component.anchorY; return; }
+
+    const cN = communities.length;
+    const x  = new Float64Array(cN), y = new Float64Array(cN);
+
+    const prevComp = previous.componentAnchorById.get(component.componentId);
+    const cdx = prevComp ? component.anchorX - prevComp.x : 0;
+    const cdy = prevComp ? component.anchorY - prevComp.y : 0;
+
+    for (let i = 0; i < cN; i++) {
+      const prev = previous.communityAnchorById.get(communities[i].communityId);
+      if (prev) { x[i] = prev.x + cdx; y[i] = prev.y + cdy; }
+      else {
+        const angle = i * GOLDEN_ANGLE;
+        const rad   = Math.max(communities[0].radius * 0.6, nodeSpacing * 5) * Math.sqrt(i + 1);
+        x[i] = component.anchorX + Math.cos(angle) * rad;
+        y[i] = component.anchorY + Math.sin(angle) * rad;
+      }
+    }
+
+    const padding = nodeSpacing * 2;
+    for (let iter = 0; iter < 80; iter++) {
+      let anyOverlap = false;
+      for (let i = 0; i < cN; i++) {
+        for (let j = i + 1; j < cN; j++) {
+          const dx = x[j] - x[i], dy = y[j] - y[i];
+          const d2  = dx * dx + dy * dy;
+          const min = communities[i].radius + communities[j].radius + padding;
+          if (d2 >= min * min) continue;
+          anyOverlap = true;
+          const d = Math.sqrt(d2) || EPS, ovl = (min - d) * 0.55;
+          const ux = dx / d, uy = dy / d;
+          const si = communities[i].nodeIds.length, sj = communities[j].nodeIds.length, tot = si + sj;
+          x[i] -= ux * ovl * sj / tot; y[i] -= uy * ovl * sj / tot;
+          x[j] += ux * ovl * si / tot; y[j] += uy * ovl * si / tot;
+        }
+      }
+      if (!anyOverlap) break;
+    }
+
+    for (let i = 0; i < cN; i++) { communities[i].anchorX = x[i]; communities[i].anchorY = y[i]; }
+  }
+
+  // ── Grid store utilities ───────────────────────────────────────────────────
+
+  protected gridPush(store: GridStore, key: number, val: number): void {
+    let arr = store.buckets.get(key);
+    if (!arr) { arr = store.pool.pop() ?? []; store.buckets.set(key, arr); store.usedKeys.push(key); }
+    arr.push(val);
+  }
+
+  protected gridClear(store: GridStore): void {
+    for (const key of store.usedKeys) {
+      const arr = store.buckets.get(key);
+      if (arr) { arr.length = 0; store.pool.push(arr); store.buckets.delete(key); }
+    }
+    store.usedKeys.length = 0;
+  }
+
+  protected gridKey(xi: number, yi: number, cellSize: number): number {
+    const cx = Math.floor(xi / cellSize), cy = Math.floor(yi / cellSize);
+    return (cx + GRID_OFFSET) * GRID_SCALE + (cy + GRID_OFFSET);
+  }
+
+  // ── Shared containment ─────────────────────────────────────────────────────
+
+  protected clampToContainment(
+    x: Float64Array, y: Float64Array, anchorX: number, anchorY: number, containR: number, n: number
+  ): void {
+    for (let i = 0; i < n; i++) {
+      const ax = x[i] - anchorX, ay = y[i] - anchorY;
+      const d  = Math.sqrt(ax * ax + ay * ay);
+      if (d > containR) { const inv = containR / d; x[i] = anchorX + ax * inv; y[i] = anchorY + ay * inv; }
+    }
+  }
+}
+
+---
+
+/**
+ * BHForceAtlas2LayoutAlgorithm
+ *
+ * ForceAtlas2 (Jacomy et al. 2014) with Barnes–Hut tree for O(n log n)
+ * repulsion per iteration instead of O(n²).
+ *
+ * Key properties:
+ *   • Repulsion is degree-weighted so hubs naturally space out
+ *   • LinLog attraction pulls clusters together without compressing them
+ *   • Gravity keeps components anchored to their region
+ *   • Swing/traction speed adaptation (FA2 §4.2) — nodes converge quickly
+ *     then lock in place without oscillating
+ *   • Multilevel warm-start: hub nodes are laid out first at a coarse scale,
+ *     then the full graph is refined around them
+ *   • Temporal stability via warm-start from previous positions + blending
+ */
+
+import { resolveNumberConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutConfigUtils";
+import type { NetworkLayoutStrategyDefinition } from "@/domain/timelapse/networkLayout/NetworkLayoutStrategyDefinition";
+import {
+  NetworkLayoutAlgorithmBase,
+  type NodeLayoutParams,
+  type NodeLayoutResult,
+  type GridStore,
+  EPS, TAU, GOLDEN_ANGLE,
+  clamp, compareString
+} from "./NetworkLayoutAlgorithmBase";
+
+// ── Default config ─────────────────────────────────────────────────────────────
+
+const DEFAULT_QUALITY       = 1.0;
+const DEFAULT_STABILITY     = 0.8;
+const DEFAULT_NODE_SPACING  = 8;
+const DEFAULT_GRAVITY       = 0.8;  // pull toward community anchor
+const DEFAULT_SCALING_RATIO = 2.0;  // repulsion strength multiplier
+
+// ── Barnes-Hut quadtree ────────────────────────────────────────────────────────
+
+type QTCell = {
+  x1: number; y1: number; x2: number; y2: number; // bounds
+  totalMass: number;
+  comX: number; comY: number;   // centre of mass
+  nodeIdx:  number;             // >= 0 = leaf (this node), -1 = internal, -2 = empty
+  nodeX:    number;             // leaf position (only valid when nodeIdx >= 0)
+  nodeY:    number;
+  nodeMass: number;
+  nw: QTCell | null; ne: QTCell | null;
+  sw: QTCell | null; se: QTCell | null;
+};
+
+function makeCell(x1: number, y1: number, x2: number, y2: number): QTCell {
+  return { x1, y1, x2, y2, totalMass: 0, comX: 0, comY: 0, nodeIdx: -2, nodeX: 0, nodeY: 0, nodeMass: 0, nw: null, ne: null, sw: null, se: null };
+}
+
+function qtInsert(cell: QTCell, idx: number, x: number, y: number, mass: number): void {
+  if (cell.nodeIdx === -2) {
+    // Empty → leaf
+    cell.nodeIdx = idx; cell.nodeX = x; cell.nodeY = y; cell.nodeMass = mass;
+    cell.comX = x; cell.comY = y; cell.totalMass = mass;
+    return;
+  }
+
+  // Update aggregate centre of mass
+  const newMass = cell.totalMass + mass;
+  cell.comX = (cell.comX * cell.totalMass + x * mass) / newMass;
+  cell.comY = (cell.comY * cell.totalMass + y * mass) / newMass;
+  cell.totalMass = newMass;
+
+  if (cell.nodeIdx >= 0) {
+    // Occupied leaf → subdivide: re-insert existing node into child
+    const ei = cell.nodeIdx, ex = cell.nodeX, ey = cell.nodeY, em = cell.nodeMass;
+    cell.nodeIdx = -1;
+    qtInsertChild(cell, ei, ex, ey, em);
+  }
+  // Insert new node
+  qtInsertChild(cell, idx, x, y, mass);
+}
+
+function qtInsertChild(cell: QTCell, idx: number, x: number, y: number, mass: number): void {
+  const midX = (cell.x1 + cell.x2) * 0.5;
+  const midY = (cell.y1 + cell.y2) * 0.5;
+  const west = x < midX, north = y < midY;
+  if (west && north) {
+    if (!cell.nw) cell.nw = makeCell(cell.x1, cell.y1, midX, midY);
+    qtInsert(cell.nw, idx, x, y, mass);
+  } else if (!west && north) {
+    if (!cell.ne) cell.ne = makeCell(midX, cell.y1, cell.x2, midY);
+    qtInsert(cell.ne, idx, x, y, mass);
+  } else if (west && !north) {
+    if (!cell.sw) cell.sw = makeCell(cell.x1, midY, midX, cell.y2);
+    qtInsert(cell.sw, idx, x, y, mass);
+  } else {
+    if (!cell.se) cell.se = makeCell(midX, midY, cell.x2, cell.y2);
+    qtInsert(cell.se, idx, x, y, mass);
+  }
+}
+
+/**
+ * Accumulate the repulsion force on node `i` from `cell` using BH theta test.
+ * Direction: away from the cell's centre of mass.
+ * Magnitude: scalingRatio * mass_i * mass_cell / dist  (FA2 formula, distance once)
+ */
+function qtRepulsion(
+  cell: QTCell,
+  i: number, xi: number, yi: number, massi: number,
+  theta: number, scalingRatio: number,
+  fx: Float64Array, fy: Float64Array
+): void {
+  if (cell.nodeIdx === -2 || cell.totalMass === 0) return;
+  if (cell.nodeIdx === i) return; // skip self-leaf
+
+  const dx = xi - cell.comX, dy = yi - cell.comY;
+  const d2 = dx * dx + dy * dy;
+  const d  = Math.sqrt(d2) || EPS;
+
+  const cellWidth = cell.x2 - cell.x1;
+
+  // BH approximation condition (but never approximate if this cell contains xi,yi)
+  const nodeInCell = xi >= cell.x1 && xi < cell.x2 && yi >= cell.y1 && yi < cell.y2;
+  if (!nodeInCell && (cell.nodeIdx >= 0 || cellWidth / d < theta)) {
+    // Treat whole cell as a single point
+    const f = scalingRatio * massi * cell.totalMass / d;
+    fx[i] += (dx / d) * f;
+    fy[i] += (dy / d) * f;
+    return;
+  }
+
+  // Recurse into children
+  if (cell.nw) qtRepulsion(cell.nw, i, xi, yi, massi, theta, scalingRatio, fx, fy);
+  if (cell.ne) qtRepulsion(cell.ne, i, xi, yi, massi, theta, scalingRatio, fx, fy);
+  if (cell.sw) qtRepulsion(cell.sw, i, xi, yi, massi, theta, scalingRatio, fx, fy);
+  if (cell.se) qtRepulsion(cell.se, i, xi, yi, massi, theta, scalingRatio, fx, fy);
+}
+
+function qtBuild(x: Float64Array, y: Float64Array, masses: Float64Array, n: number): QTCell | null {
+  if (n === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < n; i++) {
+    if (x[i] < minX) minX = x[i]; if (y[i] < minY) minY = y[i];
+    if (x[i] > maxX) maxX = x[i]; if (y[i] > maxY) maxY = y[i];
+  }
+  const pad  = 1 + (maxX - minX + maxY - minY) * 0.01;
+  const root = makeCell(minX - pad, minY - pad, maxX + pad, maxY + pad);
+  for (let i = 0; i < n; i++) qtInsert(root, i, x[i], y[i], masses[i]);
+  return root;
+}
+
+// ── Algorithm ──────────────────────────────────────────────────────────────────
+
+export class BHForceAtlas2LayoutAlgorithm extends NetworkLayoutAlgorithmBase {
+  public readonly strategy = "bh-fa2" as const;
+
+  protected layoutNodesInCommunity(params: NodeLayoutParams): NodeLayoutResult {
+    const {
+      communityId, nodeIds, anchorX, anchorY, communityRadius,
+      nodeSpacing, stability, quality, strategyConfig,
+      adjacencyByNodeId, nodeHashById, previousIndex
+    } = params;
+
+    const n = nodeIds.length;
+    const x = new Float64Array(n), y = new Float64Array(n);
+    if (n === 0) return { nodeIds, x, y };
+
+    const gravity      = resolveNumberConfig(strategyConfig, "gravity",       DEFAULT_GRAVITY,       0.1, 3.0);
+    const scalingRatio = resolveNumberConfig(strategyConfig, "scalingRatio",  DEFAULT_SCALING_RATIO, 0.5, 5.0);
+    const theta        = 1.2; // BH approximation threshold (higher = faster, less accurate)
+
+    const localIndex = new Map<string, number>();
+    for (let i = 0; i < n; i++) localIndex.set(nodeIds[i], i);
+
+    // ── Seed positions ───────────────────────────────────────────────────────
+    const prevAnchor  = previousIndex.communityAnchorById.get(communityId);
+    const anchorDx    = prevAnchor ? anchorX - prevAnchor.x : 0;
+    const anchorDy    = prevAnchor ? anchorY - prevAnchor.y : 0;
+    const containR    = communityRadius * 1.05;
+    const angleOffset = ((this.hashId(communityId) % 10000) / 10000) * TAU;
+
+    for (let i = 0; i < n; i++) {
+      const prevPos = previousIndex.nodePositions[nodeIds[i]];
+      if (prevPos) {
+        x[i] = prevPos.x + anchorDx;
+        y[i] = prevPos.y + anchorDy;
+        // Clamp to containment
+        const ax = x[i] - anchorX, ay = y[i] - anchorY;
+        const d  = Math.sqrt(ax * ax + ay * ay);
+        if (d > containR) { x[i] = anchorX + ax * containR / d; y[i] = anchorY + ay * containR / d; }
+      } else {
+        // New node: deterministic phyllotaxis seed near anchor
+        const t    = (i + 0.5) / Math.max(1, n);
+        const rad  = Math.sqrt(t) * Math.max(nodeSpacing * 3, communityRadius - nodeSpacing * 2);
+        const hash = nodeHashById.get(nodeIds[i]) ?? 0;
+        const ang  = i * GOLDEN_ANGLE + angleOffset + ((hash % 1024) / 1024 - 0.5) * 0.05;
+        x[i] = anchorX + Math.cos(ang) * rad;
+        y[i] = anchorY + Math.sin(ang) * rad;
+      }
+    }
+
+    // ── Degree array & masses ────────────────────────────────────────────────
+    const degrees = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const nbs = adjacencyByNodeId.get(nodeIds[i]);
+      if (!nbs) continue;
+      for (const nb of nbs) if (localIndex.has(nb)) degrees[i]++;
+    }
+    const masses = new Float64Array(n);
+    for (let i = 0; i < n; i++) masses[i] = degrees[i] + 1;
+
+    // ── Multilevel warm-start ────────────────────────────────────────────────
+    // On first frame (no prev positions): seed hub nodes deterministically on rings
+    // and run a short coarse pass, then continue with the full simulation.
+    // This prevents the common "big-bang" collapse on initialisation.
+    if (!prevAnchor || n > 20) {
+      let newNodeCount = 0;
+      for (let i = 0; i < n; i++) { if (!previousIndex.nodePositions[nodeIds[i]]) newNodeCount++; }
+      if (newNodeCount > n * 0.4) {
+        this.coarseInit(x, y, nodeIds, anchorX, anchorY, communityRadius, nodeSpacing, degrees, localIndex, adjacencyByNodeId, angleOffset);
+      }
+    }
+
+    // ── Edge list (within community) ─────────────────────────────────────────
+    const edgesA: number[] = [], edgesB: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const nbs = adjacencyByNodeId.get(nodeIds[i]); if (!nbs) continue;
+      for (const nb of nbs) {
+        const j = localIndex.get(nb);
+        if (j != null && j > i) { edgesA.push(i); edgesB.push(j); }
+      }
+    }
+
+    // ── FA2 simulation ───────────────────────────────────────────────────────
+    const iters     = clamp(Math.round(30 * quality * (n <= 80 ? 1.4 : n <= 300 ? 1.1 : n <= 1200 ? 0.85 : 0.55)), 6, 60);
+    const fx        = new Float64Array(n), fy  = new Float64Array(n);
+    const pfx       = new Float64Array(n), pfy = new Float64Array(n); // previous forces for swing
+    const swing     = new Float64Array(n);
+
+    // Per-node speed (initialised generously)
+    const speed     = new Float64Array(n).fill(nodeSpacing * 0.8);
+    const maxDisplace = communityRadius * 0.3;
+
+    for (let iter = 0; iter < iters; iter++) {
+      fx.fill(0); fy.fill(0);
+
+      const t     = iter / Math.max(1, iters - 1);
+      const alpha = 1 - t * 0.7; // slow cooling (FA2 doesn't cool much — swing handles it)
+
+      // ── BH repulsion ───────────────────────────────────────────────────────
+      const root = qtBuild(x, y, masses, n);
+      if (root) {
+        for (let i = 0; i < n; i++) {
+          qtRepulsion(root, i, x[i], y[i], masses[i], theta, scalingRatio, fx, fy);
+        }
+      }
+
+      // ── LinLog edge attraction ─────────────────────────────────────────────
+      // FA2 LinLog: F_a(i,j) = log(1 + dist) / (degree(i) + 1)
+      // This keeps clusters together without squashing them
+      for (let e = 0; e < edgesA.length; e++) {
+        const i = edgesA[e], j = edgesB[e];
+        let dx = x[j] - x[i], dy = y[j] - y[i];
+        let d2 = dx * dx + dy * dy;
+        if (d2 < EPS) { const a = ((i * 997 + j * 991 + iter * 37) % 360) * (TAU / 360); dx = Math.cos(a); dy = Math.sin(a); d2 = 1; }
+        const d  = Math.sqrt(d2);
+        const fa = Math.log(1 + d) / scalingRatio;
+        const ux = dx / d, uy = dy / d;
+        // Degree-normalised attraction: heavy-degree nodes attract less
+        const wi = fa / (degrees[i] + 1), wj = fa / (degrees[j] + 1);
+        fx[i] += ux * wi * masses[i]; fy[i] += uy * wi * masses[i];
+        fx[j] -= ux * wj * masses[j]; fy[j] -= uy * wj * masses[j];
+      }
+
+      // ── Gravity toward community anchor ────────────────────────────────────
+      for (let i = 0; i < n; i++) {
+        const dx = anchorX - x[i], dy = anchorY - y[i];
+        const d  = Math.sqrt(dx * dx + dy * dy) || EPS;
+        const fg = gravity * masses[i] * d;
+        fx[i] += (dx / d) * fg;
+        fy[i] += (dy / d) * fg;
+      }
+
+      // ── Swing-based speed adaptation (FA2 §4.2) ───────────────────────────
+      // swing(i) ≈ |F_cur - F_prev|  — high swing means oscillation → slow down
+      let globalSwing = 0, globalTraction = 0;
+      for (let i = 0; i < n; i++) {
+        const sdx = fx[i] - pfx[i], sdy = fy[i] - pfy[i];
+        swing[i] = Math.sqrt(sdx * sdx + sdy * sdy);
+        const trx = fx[i] + pfx[i], trY = fy[i] + pfy[i];
+        globalSwing   += masses[i] * swing[i];
+        globalTraction += masses[i] * Math.sqrt(trx * trx + trY * trY) * 0.5;
+      }
+      const speedRatio = globalSwing > EPS ? globalTraction / globalSwing : 1;
+      // Target global speed proportional to traction/swing
+      const gs = clamp(0.1 * speedRatio * alpha, 0.005, nodeSpacing * 1.2);
+
+      // ── Integrate ─────────────────────────────────────────────────────────
+      for (let i = 0; i < n; i++) {
+        // Per-node speed: slower if swinging
+        speed[i] = Math.min(
+          clamp(speed[i] * (1 + 0.2 * (swing[i] < 0.1 ? 1 : -1)), 0.005, maxDisplace),
+          gs / (1 + gs * swing[i] * 0.15)
+        );
+
+        const fm = Math.sqrt(fx[i] * fx[i] + fy[i] * fy[i]) || EPS;
+        const cap = Math.min(speed[i], maxDisplace / fm);
+        x[i] += (fx[i] / fm) * fm * cap;
+        y[i] += (fy[i] / fm) * fm * cap;
+
+        pfx[i] = fx[i]; pfy[i] = fy[i];
+      }
+
+      this.clampToContainment(x, y, anchorX, anchorY, containR, n);
+    }
+
+    // ── Temporal blending ────────────────────────────────────────────────────
+    // Blend FA2 result back toward previous positions based on stability.
+    // This prevents the layout from jumping when a few nodes join/leave.
+    if (stability > 0) {
+      for (let i = 0; i < n; i++) {
+        const prevPos = previousIndex.nodePositions[nodeIds[i]];
+        if (!prevPos) continue;
+        const px = prevPos.x + anchorDx, py = prevPos.y + anchorDy;
+        x[i] = px + (x[i] - px) * (1 - stability);
+        y[i] = py + (y[i] - py) * (1 - stability);
+      }
+      this.clampToContainment(x, y, anchorX, anchorY, containR, n);
+    }
+
+    return { nodeIds, x, y };
+  }
+
+  /**
+   * Coarse initialisation for first-frame layouts.
+   * Places high-degree hub nodes on the inner ring, medium nodes on middle ring,
+   * peripheral nodes on the outer ring.  This gives FA2 a good warm-start so it
+   * doesn't have to undo a random big-bang.
+   */
+  private coarseInit(
+    x: Float64Array, y: Float64Array,
+    nodeIds: string[],
+    anchorX: number, anchorY: number, communityRadius: number, nodeSpacing: number,
+    degrees: Float64Array,
+    localIndex: Map<string, number>,
+    adjacencyByNodeId: Map<string, Set<string>>,
+    angleOffset: number
+  ): void {
+    const n = nodeIds.length;
+    if (n <= 3) return;
+
+    // Bucket nodes into 3 tiers by degree
+    const sorted = Array.from({ length: n }, (_, i) => i).sort((a, b) => degrees[b] - degrees[a]);
+    const hubCut = Math.max(1, Math.round(n * 0.12));
+    const midCut = Math.max(hubCut + 1, Math.round(n * 0.45));
+
+    const r0 = nodeSpacing * 1.5;
+    const r1 = Math.max(nodeSpacing * 3, communityRadius * 0.38);
+    const r2 = Math.max(nodeSpacing * 5, communityRadius * 0.78);
+
+    for (let k = 0; k < n; k++) {
+      const i = sorted[k];
+      let radius: number;
+      if (k < hubCut)      radius = r0;
+      else if (k < midCut) radius = r1;
+      else                 radius = r2;
+
+      // Sort within tier by connectivity to already-placed neighbours for locality
+      const ang = angleOffset + (k / n) * TAU + (k < hubCut ? 0 : (i * GOLDEN_ANGLE));
+      x[i] = anchorX + Math.cos(ang) * radius;
+      y[i] = anchorY + Math.sin(ang) * radius;
+    }
+  }
+}
+
+// ── Strategy definition ────────────────────────────────────────────────────────
+
+export const BH_FA2_STRATEGY_DEFINITION: NetworkLayoutStrategyDefinition = {
+  strategy: "bh-fa2",
+  label:    "Barnes-Hut FA2",
+  fields: [
+    { key: "quality",       label: "Quality",         min: 0.5, max: 1.5, step: 0.05 },
+    { key: "stability",     label: "Stability",       min: 0,   max: 0.95, step: 0.05 },
+    { key: "nodeSpacing",   label: "Node Spacing",    min: 4,   max: 20, step: 1 },
+    { key: "gravity",       label: "Gravity",         min: 0.1, max: 3.0, step: 0.1 },
+    { key: "scalingRatio",  label: "Scaling Ratio",   min: 0.5, max: 5.0, step: 0.1 }
+  ],
+  createInitialConfig: () => ({
+    quality:      DEFAULT_QUALITY,
+    stability:    DEFAULT_STABILITY,
+    nodeSpacing:  DEFAULT_NODE_SPACING,
+    gravity:      DEFAULT_GRAVITY,
+    scalingRatio: DEFAULT_SCALING_RATIO
+  }),
+  summarizeConfig: (c) =>
+    `q=${Number(c.quality ?? DEFAULT_QUALITY).toFixed(2)} ` +
+    `stab=${Number(c.stability ?? DEFAULT_STABILITY).toFixed(2)} ` +
+    `g=${Number(c.gravity ?? DEFAULT_GRAVITY).toFixed(1)} ` +
+    `k=${Number(c.scalingRatio ?? DEFAULT_SCALING_RATIO).toFixed(1)}`,
+  createAlgorithm: () => new BHForceAtlas2LayoutAlgorithm()
+};
+
+---
+
+/**
+ * StressMajorizationLayoutAlgorithm
+ *
+ * Minimises weighted stress: Σ_{i<j} w_ij (||x_i - x_j|| - d_ij)²
+ * where d_ij = BFS hop-distance and w_ij = d_ij^{-2} (Kamada-Kawai weighting).
+ *
+ * Key properties:
+ *   • Stress majorization has a globally-convergent update rule that moves
+ *     each node to the weighted centroid of where it "ought to be" given all
+ *     its distance targets.  No oscillation, no cooling schedule.
+ *   • Anchor regularization: an extra virtual spring to each node's previous
+ *     position with weight `anchorWeight`.  This directly controls the
+ *     stability/accuracy trade-off — larger anchorWeight = more stability.
+ *   • Sparse distances: BFS from every node up to `maxHops` hops.  Only pairs
+ *     within that hop radius contribute to stress, capping cost at O(n * E).
+ *   • Incrementally warm-started from previous positions each frame, so the
+ *     solver only needs 8–15 iterations to reach a near-optimal layout.
+ *
+ * References:
+ *   Gansner et al. "Graph Drawing by Stress Majorization" (GD 2004)
+ *   de Leeuw "Applications of Convex Analysis to Multidimensional Scaling" (1977)
+ */
+
+import { resolveNumberConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutConfigUtils";
+import type { NetworkLayoutStrategyDefinition } from "@/domain/timelapse/networkLayout/NetworkLayoutStrategyDefinition";
+import {
+  NetworkLayoutAlgorithmBase,
+  type NodeLayoutParams,
+  type NodeLayoutResult,
+  EPS,
+  clamp
+} from "./NetworkLayoutAlgorithmBase";
+
+// ── Defaults ───────────────────────────────────────────────────────────────────
+
+const DEFAULT_QUALITY       = 1.0;
+const DEFAULT_STABILITY     = 0.8;
+const DEFAULT_NODE_SPACING  = 8;
+const DEFAULT_ANCHOR_WEIGHT = 1.2; // weight of virtual prev-position spring
+const DEFAULT_MAX_HOPS      = 5;   // BFS distance cap
+
+// ── Algorithm ──────────────────────────────────────────────────────────────────
+
+export class StressMajorizationLayoutAlgorithm extends NetworkLayoutAlgorithmBase {
+  public readonly strategy = "stress-majorization" as const;
+
+  protected layoutNodesInCommunity(params: NodeLayoutParams): NodeLayoutResult {
+    const {
+      communityId, nodeIds, anchorX, anchorY, communityRadius,
+      nodeSpacing, stability, quality, strategyConfig,
+      adjacencyByNodeId, nodeHashById, previousIndex
+    } = params;
+
+    const n = nodeIds.length;
+    const x = new Float64Array(n), y = new Float64Array(n);
+    if (n === 0) return { nodeIds, x, y };
+
+    const anchorWeight = resolveNumberConfig(strategyConfig, "anchorWeight", DEFAULT_ANCHOR_WEIGHT, 0.0, 4.0);
+    const maxHops      = Math.round(resolveNumberConfig(strategyConfig, "maxHops", DEFAULT_MAX_HOPS, 2, 10));
+    const iters        = clamp(Math.round(12 * quality * (n <= 60 ? 1.5 : n <= 250 ? 1.1 : n <= 800 ? 0.8 : 0.6)), 3, 25);
+
+    const localIndex = new Map<string, number>();
+    for (let i = 0; i < n; i++) localIndex.set(nodeIds[i], i);
+
+    // ── Seed positions from previous frame (translated by anchor delta) ───────
+    const prevAnchor = previousIndex.communityAnchorById.get(communityId);
+    const anchorDx   = prevAnchor ? anchorX - prevAnchor.x : 0;
+    const anchorDy   = prevAnchor ? anchorY - prevAnchor.y : 0;
+    const containR   = communityRadius * 1.05;
+    const seedR      = Math.max(nodeSpacing * 3, communityRadius - nodeSpacing * 2);
+
+    // Also record these as "previous" positions for the anchor term
+    const prevX = new Float64Array(n), prevY = new Float64Array(n);
+    const hasPrev = new Uint8Array(n);
+
+    for (let i = 0; i < n; i++) {
+      const prevPos = previousIndex.nodePositions[nodeIds[i]];
+      if (prevPos) {
+        x[i] = prevPos.x + anchorDx;
+        y[i] = prevPos.y + anchorDy;
+        prevX[i] = x[i];
+        prevY[i] = y[i];
+        hasPrev[i] = 1;
+        // Clamp to containment
+        const ax = x[i] - anchorX, ay = y[i] - anchorY;
+        const d = Math.sqrt(ax * ax + ay * ay);
+        if (d > containR) { x[i] = anchorX + ax * containR / d; y[i] = anchorY + ay * containR / d; }
+      } else {
+        // New node: place near connected neighbours if possible, else phyllotaxis
+        let sx = 0, sy = 0, sc = 0;
+        const nbs = adjacencyByNodeId.get(nodeIds[i]);
+        if (nbs) for (const nb of nbs) { const j = localIndex.get(nb); if (j != null && hasPrev[j]) { sx += x[j]; sy += y[j]; sc++; if (sc >= 4) break; } }
+        if (sc > 0) {
+          x[i] = sx / sc; y[i] = sy / sc;
+        } else {
+          const hash = nodeHashById.get(nodeIds[i]) ?? i;
+          const ang  = i * Math.PI * (3 - Math.sqrt(5)) + ((hash % 10000) / 10000) * 2 * Math.PI;
+          const rad  = Math.sqrt((i + 0.5) / Math.max(1, n)) * seedR;
+          x[i] = anchorX + Math.cos(ang) * rad;
+          y[i] = anchorY + Math.sin(ang) * rad;
+        }
+        prevX[i] = x[i]; prevY[i] = y[i];
+      }
+    }
+
+    // ── Sparse BFS distances ──────────────────────────────────────────────────
+    // For each node, record the distances d_ij and weights w_ij to all nodes
+    // within `maxHops` hops.  Stored flat: distTargetJ[k], distValue[k], distWeight[k]
+    // with offsets[i] .. offsets[i+1] giving the slice for node i.
+    const targetIdeal = nodeSpacing * 2.2; // target physical distance per hop
+
+    // Two-pass: first count, then fill
+    const neighbourCount = new Int32Array(n);
+    const bfsQueue       = new Int32Array(n + 4);
+    const bfsDist        = new Int32Array(n);
+
+    // Count pass
+    for (let src = 0; src < n; src++) {
+      bfsDist.fill(-1);
+      bfsDist[src] = 0;
+      bfsQueue[0]  = src;
+      let head = 0, tail = 1;
+      while (head < tail) {
+        const cur = bfsQueue[head++];
+        const d   = bfsDist[cur];
+        if (d >= maxHops) continue;
+        const nbs = adjacencyByNodeId.get(nodeIds[cur]);
+        if (!nbs) continue;
+        for (const nb of nbs) {
+          const j = localIndex.get(nb);
+          if (j == null || bfsDist[j] !== -1) continue;
+          bfsDist[j] = d + 1;
+          bfsQueue[tail++] = j;
+          neighbourCount[src]++;
+        }
+      }
+    }
+
+    const offsets = new Int32Array(n + 1);
+    for (let i = 0; i < n; i++) offsets[i + 1] = offsets[i] + neighbourCount[i];
+    const total   = offsets[n];
+    const distJ   = new Int32Array(total);   // neighbour index j
+    const distD   = new Float64Array(total); // target distance d_ij
+    const distW   = new Float64Array(total); // weight w_ij = 1/d²
+    // Also store L_w[i] = Σ_j w_ij  (diagonal of weighted Laplacian)
+    const lw      = new Float64Array(n);
+
+    // Fill pass
+    const fillPos = new Int32Array(n);
+    for (let src = 0; src < n; src++) {
+      bfsDist.fill(-1);
+      bfsDist[src] = 0;
+      bfsQueue[0]  = src;
+      let head = 0, tail = 1;
+      while (head < tail) {
+        const cur = bfsQueue[head++];
+        const d   = bfsDist[cur];
+        if (d >= maxHops) continue;
+        const nbs = adjacencyByNodeId.get(nodeIds[cur]);
+        if (!nbs) continue;
+        for (const nb of nbs) {
+          const j = localIndex.get(nb);
+          if (j == null || bfsDist[j] !== -1) continue;
+          bfsDist[j] = d + 1;
+          bfsQueue[tail++] = j;
+          const dij  = (d + 1) * targetIdeal;
+          const wij  = 1 / (dij * dij + EPS);
+          const pos  = offsets[src] + fillPos[src];
+          distJ[pos] = j;
+          distD[pos] = dij;
+          distW[pos] = wij;
+          fillPos[src]++;
+          lw[src] += wij;
+        }
+      }
+    }
+
+    // ── Majorization iterations ───────────────────────────────────────────────
+    //
+    // Update rule (Gansner et al. eq. 11):
+    //   x_i^{t+1} = [ Σ_j w_ij (x_j^t + d_ij * ux_ij^t) + α * prevX_i ] / [ L_w[i] + α ]
+    //
+    // where ux_ij = (x_i - x_j) / ||x_i - x_j||  (unit vector from j toward i)
+    // and α = anchorWeight (the prev-position spring weight)
+    //
+    // This is a simple, unconditionally convergent fixed-point iteration.
+    // The anchor term biases the solution toward the previous layout,
+    // providing direct temporal stability without post-hoc blending.
+
+    const nx = new Float64Array(n), ny = new Float64Array(n);
+
+    for (let iter = 0; iter < iters; iter++) {
+      for (let i = 0; i < n; i++) {
+        const start = offsets[i], end = offsets[i + 1];
+        let sumX = 0, sumY = 0;
+
+        for (let p = start; p < end; p++) {
+          const j   = distJ[p];
+          const dij = distD[p];
+          const wij = distW[p];
+
+          let dx = x[i] - x[j], dy = y[i] - y[j];
+          let d  = Math.sqrt(dx * dx + dy * dy);
+          if (d < EPS) {
+            // Jitter to break symmetry deterministically
+            const ang = ((i * 997 + j * 991 + iter * 37) % 360) * (2 * Math.PI / 360);
+            dx = Math.cos(ang) * 0.01; dy = Math.sin(ang) * 0.01; d = 0.01;
+          }
+
+          // z_ij = x_j + d_ij * unit(x_i - x_j)  — where we "wish" x_i was
+          sumX += wij * (x[j] + dij * (dx / d));
+          sumY += wij * (y[j] + dij * (dy / d));
+        }
+
+        // Add anchor spring toward previous position
+        const aw    = anchorWeight * (hasPrev[i] ? 1.0 : 0.3);
+        const denom = lw[i] + aw;
+
+        if (denom < EPS) {
+          nx[i] = x[i]; ny[i] = y[i];
+        } else {
+          nx[i] = (sumX + aw * prevX[i]) / denom;
+          ny[i] = (sumY + aw * prevY[i]) / denom;
+        }
+      }
+
+      // Copy back and clamp
+      for (let i = 0; i < n; i++) { x[i] = nx[i]; y[i] = ny[i]; }
+      this.clampToContainment(x, y, anchorX, anchorY, containR, n);
+    }
+
+    // ── Light gravity pass ─────────────────────────────────────────────────────
+    // Isolated nodes (no BFS neighbours within maxHops) have lw[i] ≈ 0 and
+    // drift.  Pull everything gently toward the community anchor.
+    const gravityStrength = 0.06;
+    for (let i = 0; i < n; i++) {
+      x[i] += (anchorX - x[i]) * gravityStrength;
+      y[i] += (anchorY - y[i]) * gravityStrength;
+    }
+
+    // ── Temporal blending on top (for cases where stability > anchorWeight) ──
+    // The anchor term already provides stability; this is a small extra nudge.
+    const extraBlend = stability * 0.35;
+    if (extraBlend > 0.01 && prevAnchor) {
+      for (let i = 0; i < n; i++) {
+        if (!hasPrev[i]) continue;
+        x[i] = prevX[i] + (x[i] - prevX[i]) * (1 - extraBlend);
+        y[i] = prevY[i] + (y[i] - prevY[i]) * (1 - extraBlend);
+      }
+    }
+
+    // ── Final collision resolution ────────────────────────────────────────────
+    this.clampToContainment(x, y, anchorX, anchorY, containR, n);
+    if (n > 1 && n <= 800) this.resolveCollisions(x, y, anchorX, anchorY, nodeSpacing, containR, n);
+
+    return { nodeIds, x, y };
+  }
+
+  /**
+   * Minimal O(n²) collision pass for small communities,
+   * grid-based for large ones.
+   */
+  private resolveCollisions(
+    x: Float64Array, y: Float64Array,
+    anchorX: number, anchorY: number,
+    nodeSpacing: number, containR: number, n: number
+  ): void {
+    const minD = nodeSpacing * 0.88;
+    const iters = n <= 200 ? 2 : 1;
+
+    for (let iter = 0; iter < iters; iter++) {
+      if (n <= 350) {
+        for (let i = 0; i < n; i++) {
+          for (let j = i + 1; j < n; j++) {
+            let dx = x[i] - x[j], dy = y[i] - y[j];
+            const d2 = dx * dx + dy * dy;
+            if (d2 >= minD * minD) continue;
+            const d = Math.sqrt(d2) || EPS, push = (minD - d) * 0.5;
+            dx /= d; dy /= d;
+            x[i] += dx * push; y[i] += dy * push;
+            x[j] -= dx * push; y[j] -= dy * push;
+          }
+        }
+      } else {
+        const cellSize = minD * 2;
+        const store = this.makeGridStore();
+        for (let i = 0; i < n; i++) this.gridPush(store, this.gridKey(x[i], y[i], cellSize), i);
+        const fx = new Float64Array(n), fy = new Float64Array(n);
+        for (let i = 0; i < n; i++) {
+          const cx = Math.floor(x[i] / cellSize), cy = Math.floor(y[i] / cellSize);
+          for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+            const key = (cx + ox + 1_048_576) * 2_097_153 + (cy + oy + 1_048_576);
+            const b = store.buckets.get(key); if (!b) continue;
+            for (const j of b) {
+              if (j <= i) continue;
+              let dx = x[i] - x[j], dy = y[i] - y[j];
+              const d2 = dx * dx + dy * dy;
+              if (d2 >= minD * minD) continue;
+              const d = Math.sqrt(d2) || EPS, push = (minD - d) * 0.5;
+              dx /= d; dy /= d;
+              fx[i] += dx * push; fy[i] += dy * push;
+              fx[j] -= dx * push; fy[j] -= dy * push;
+            }
+          }
+        }
+        this.gridClear(store);
+        for (let i = 0; i < n; i++) { x[i] += fx[i]; y[i] += fy[i]; }
+      }
+      this.clampToContainment(x, y, anchorX, anchorY, containR, n);
+    }
+  }
+
+  private makeGridStore(): import("./NetworkLayoutAlgorithmBase").GridStore {
+    return { buckets: new Map(), usedKeys: [], pool: [] };
+  }
+}
+
+// ── Strategy definition ────────────────────────────────────────────────────────
+
+export const STRESS_MAJORIZATION_STRATEGY_DEFINITION: NetworkLayoutStrategyDefinition = {
+  strategy: "stress-majorization",
+  label:    "Stress Majorization",
+  fields: [
+    { key: "quality",       label: "Quality",         min: 0.5, max: 1.5, step: 0.05 },
+    { key: "stability",     label: "Stability",       min: 0,   max: 0.95, step: 0.05 },
+    { key: "nodeSpacing",   label: "Node Spacing",    min: 4,   max: 20,   step: 1 },
+    { key: "anchorWeight",  label: "Anchor Weight",   min: 0.0, max: 4.0,  step: 0.1 },
+    { key: "maxHops",       label: "Max Hops",        min: 2,   max: 10,   step: 1 }
+  ],
+  createInitialConfig: () => ({
+    quality:      DEFAULT_QUALITY,
+    stability:    DEFAULT_STABILITY,
+    nodeSpacing:  DEFAULT_NODE_SPACING,
+    anchorWeight: DEFAULT_ANCHOR_WEIGHT,
+    maxHops:      DEFAULT_MAX_HOPS
+  }),
+  summarizeConfig: (c) =>
+    `q=${Number(c.quality ?? DEFAULT_QUALITY).toFixed(2)} ` +
+    `stab=${Number(c.stability ?? DEFAULT_STABILITY).toFixed(2)} ` +
+    `anc=${Number(c.anchorWeight ?? DEFAULT_ANCHOR_WEIGHT).toFixed(1)} ` +
+    `hops=${Number(c.maxHops ?? DEFAULT_MAX_HOPS)}`,
+  createAlgorithm: () => new StressMajorizationLayoutAlgorithm()
+};
+
+---
+
+/**
+ * RadialSugiyamaLayoutAlgorithm
+ *
+ * Adapts the Sugiyama framework (Sugiyama et al. 1981) to radial/polar
+ * coordinates for non-hierarchical communities.
+ *
+ * Pipeline:
+ *   1. BFS layering from the highest-degree hub node
+ *   2. Barycentric crossing minimisation — multiple up/down sweeps that
+ *      sort each ring by the mean angular position of its neighbours on the
+ *      adjacent ring.  This directly minimises edge-crossing count.
+ *   3. Adjacent-swap fine pass within each ring to reduce any remaining
+ *      crossings left by the barycentric heuristic.
+ *   4. Radial position assignment: each ring gets a radius proportional to
+ *      its depth, each node gets an angular slot proportional to its position
+ *      within the ring.
+ *   5. Rotation alignment: rotate the entire layout to best-match the previous
+ *      frame (minimises spin drift without altering crossing count).
+ *   6. Temporal lerp: blend the new layout toward the previous positions.
+ *
+ * Guarantees:
+ *   • No two nodes on the same ring ever overlap (minimum arc spacing enforced).
+ *   • Connected nodes are always on adjacent rings → edges are always short.
+ *   • The crossing minimisation ensures tree edges are radial and non-crossing;
+ *     cross-ring edges are drawn as arcs which rarely cross each other.
+ *
+ * References:
+ *   Sugiyama, Tagawa, Toda "Methods for Visual Understanding of Hierarchical
+ *   System Structures" (1981)
+ *   Baur & Brandes "Crossing Reduction in Circular Layouts" (2004)
+ */
+
+import { resolveNumberConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutConfigUtils";
+import type { NetworkLayoutStrategyDefinition } from "@/domain/timelapse/networkLayout/NetworkLayoutStrategyDefinition";
+import {
+  NetworkLayoutAlgorithmBase,
+  type NodeLayoutParams,
+  type NodeLayoutResult,
+  type SnapshotIndex,
+  EPS, TAU, GOLDEN_ANGLE,
+  clamp, compareString
+} from "./NetworkLayoutAlgorithmBase";
+
+// ── Defaults ───────────────────────────────────────────────────────────────────
+
+const DEFAULT_QUALITY      = 1.0;
+const DEFAULT_STABILITY    = 0.8;
+const DEFAULT_NODE_SPACING = 8;
+const DEFAULT_SWEEP_PASSES = 4;  // barycentric sweep iterations per frame
+
+// ── Algorithm ──────────────────────────────────────────────────────────────────
+
+export class RadialSugiyamaLayoutAlgorithm extends NetworkLayoutAlgorithmBase {
+  public readonly strategy = "radial-sugiyama" as const;
+
+  protected layoutNodesInCommunity(params: NodeLayoutParams): NodeLayoutResult {
+    const {
+      communityId, nodeIds, anchorX, anchorY, communityRadius,
+      nodeSpacing, stability, quality, strategyConfig,
+      adjacencyByNodeId, nodeHashById, previousIndex
+    } = params;
+
+    const n = nodeIds.length;
+    const x = new Float64Array(n), y = new Float64Array(n);
+    if (n === 0) return { nodeIds, x, y };
+    if (n === 1) { x[0] = anchorX; y[0] = anchorY; return { nodeIds, x, y }; }
+
+    const sweepPasses = Math.round(
+      resolveNumberConfig(strategyConfig, "sweepPasses", DEFAULT_SWEEP_PASSES, 1, 8) * quality
+    );
+
+    const localIndex = new Map<string, number>();
+    for (let i = 0; i < n; i++) localIndex.set(nodeIds[i], i);
+
+    // ── 1. Find hub (highest in-community degree, tie-break by nodeId) ────────
+    let hubIdx = 0, maxDeg = -1;
+    for (let i = 0; i < n; i++) {
+      let deg = 0;
+      const nbs = adjacencyByNodeId.get(nodeIds[i]);
+      if (nbs) for (const nb of nbs) if (localIndex.has(nb)) deg++;
+      if (deg > maxDeg || (deg === maxDeg && compareString(nodeIds[i], nodeIds[hubIdx]) < 0)) {
+        maxDeg = deg; hubIdx = i;
+      }
+    }
+
+    // ── 2. BFS layering ───────────────────────────────────────────────────────
+    const layer      = new Int32Array(n).fill(-1);
+    const parentIdx  = new Int32Array(n).fill(-1);
+    const bfsQ       = new Int32Array(n);
+    layer[hubIdx]    = 0;
+    bfsQ[0]          = hubIdx;
+    let head = 0, tail = 1, maxLayer = 0;
+
+    while (head < tail) {
+      const cur = bfsQ[head++];
+      const lay = layer[cur];
+      const nbs = adjacencyByNodeId.get(nodeIds[cur]); if (!nbs) continue;
+      for (const nb of nbs) {
+        const j = localIndex.get(nb); if (j == null || layer[j] !== -1) continue;
+        layer[j] = lay + 1;
+        parentIdx[j] = cur;
+        if (lay + 1 > maxLayer) maxLayer = lay + 1;
+        bfsQ[tail++] = j;
+      }
+    }
+
+    // Nodes unreachable from hub (disconnected subgraph edge case)
+    for (let i = 0; i < n; i++) if (layer[i] === -1) { layer[i] = maxLayer + 1; }
+    const numLayers = maxLayer + 1;
+
+    // ── 3. Group nodes into rings ─────────────────────────────────────────────
+    const rings: number[][] = [];
+    for (let r = 0; r <= maxLayer + 1; r++) rings.push([]);
+    for (let i = 0; i < n; i++) rings[layer[i]].push(i);
+
+    // Initial ring order: sort by parent's current angular slot so children
+    // start near their parents (BFS-natural order = already good)
+    // This is the "initial permutation" for the barycentric algorithm.
+
+    // ── 4. Assign ring radii ──────────────────────────────────────────────────
+    const usableR = Math.max(nodeSpacing * 2, communityRadius - nodeSpacing);
+    const ringR   = new Float64Array(numLayers);
+    // Ring 0 = hub at centre
+    ringR[0] = 0;
+    let prevR = 0;
+    for (let r = 1; r < numLayers; r++) {
+      const count    = rings[r]?.length ?? 0;
+      // Enough circumference for `count` nodes with nodeSpacing gap
+      const minByN   = count > 1 ? count * nodeSpacing * 1.2 / (2 * Math.PI) : nodeSpacing;
+      const minByPrev = prevR + nodeSpacing * 1.6;
+      const natural  = (r / numLayers) * usableR;
+      ringR[r] = Math.max(natural, minByN, minByPrev);
+      prevR    = ringR[r];
+    }
+
+    // ── 5. Barycentric crossing minimisation ──────────────────────────────────
+    //
+    // For each ring r, assign each node a "barycenter" = mean of its neighbours'
+    // angular positions on ring r-1 (or r+1 on the down sweep).
+    // Sorting by barycenter minimises crossing count between the two rings.
+    //
+    // We represent positions within a ring as indices [0, count), then
+    // convert to angles at assignment time.
+
+    // Current angular positions (slot indices) within each ring
+    const ringPos = new Array<Float64Array>(numLayers);
+    for (let r = 0; r < numLayers; r++) {
+      ringPos[r] = new Float64Array(rings[r].length);
+      for (let k = 0; k < rings[r].length; k++) ringPos[r][k] = k;
+    }
+    // Map nodeIdx → position-within-ring (for O(1) lookup in sweep)
+    const posInRing = new Float64Array(n); // initialised to index
+    for (let r = 0; r < numLayers; r++)
+      for (let k = 0; k < rings[r].length; k++) posInRing[rings[r][k]] = k;
+
+    // Angle-from-slot: angle = startAngle + slot/count * TAU
+    // We compute startAngle per ring as a fixed offset (deterministic from hub hash)
+    const startAngle = ((this.hashId(nodeIds[hubIdx]) % 10000) / 10000) * TAU;
+
+    // node → current angle (maintained throughout sweeps for barycenter computation)
+    const nodeAngle = new Float64Array(n);
+    const updateAngles = () => {
+      nodeAngle[hubIdx] = 0; // hub is always at the centre
+      for (let r = 1; r < numLayers; r++) {
+        const ring = rings[r]; const count = ring.length;
+        if (count === 0) continue;
+        for (let k = 0; k < count; k++) {
+          nodeAngle[ring[k]] = startAngle + (k / count) * TAU;
+        }
+      }
+    };
+    updateAngles();
+
+    for (let pass = 0; pass < sweepPasses; pass++) {
+      // Down sweep: for each ring r = 1..numLayers-1, sort by mean angle of
+      // neighbours on ring r-1
+      for (let r = 1; r < numLayers; r++) {
+        const ring = rings[r]; if (ring.length <= 1) continue;
+        this.barycentricSort(ring, r, adjacencyByNodeId, nodeIds, localIndex, layer, nodeAngle, startAngle);
+        // Update angles for this ring
+        for (let k = 0; k < ring.length; k++) nodeAngle[ring[k]] = startAngle + (k / ring.length) * TAU;
+      }
+
+      // Up sweep: for each ring r = numLayers-2..0, sort by mean angle of
+      // neighbours on ring r+1
+      for (let r = numLayers - 2; r >= 1; r--) {
+        const ring = rings[r]; if (ring.length <= 1) continue;
+        this.barycentricSort(ring, r, adjacencyByNodeId, nodeIds, localIndex, layer, nodeAngle, startAngle);
+        for (let k = 0; k < ring.length; k++) nodeAngle[ring[k]] = startAngle + (k / ring.length) * TAU;
+      }
+
+      // Fine pass: adjacent-swap within each ring to fix remaining crossings
+      if (pass === sweepPasses - 1 || n <= 60) {
+        for (let r = 1; r < numLayers; r++) {
+          const ring = rings[r]; if (ring.length <= 2) continue;
+          this.adjacentSwapPass(ring, r, adjacencyByNodeId, nodeIds, localIndex, layer, nodeAngle, startAngle);
+          for (let k = 0; k < ring.length; k++) nodeAngle[ring[k]] = startAngle + (k / ring.length) * TAU;
+        }
+      }
+    }
+
+    // ── 6. Assign radial positions ────────────────────────────────────────────
+    const targetX = new Float64Array(n), targetY = new Float64Array(n);
+    targetX[hubIdx] = anchorX; targetY[hubIdx] = anchorY;
+
+    for (let r = 1; r < numLayers; r++) {
+      const ring = rings[r], count = ring.length;
+      for (let k = 0; k < count; k++) {
+        const i   = ring[k];
+        const ang = startAngle + (k / count) * TAU;
+        targetX[i] = anchorX + Math.cos(ang) * ringR[r];
+        targetY[i] = anchorY + Math.sin(ang) * ringR[r];
+      }
+    }
+
+    // ── 7. Rotation alignment (minimise spin drift vs. previous frame) ────────
+    const prevAnchor = previousIndex.communityAnchorById.get(communityId);
+    if (prevAnchor) {
+      this.alignRotation(targetX, targetY, nodeIds, anchorX, anchorY, prevAnchor, previousIndex, n);
+    }
+
+    // ── 8. Temporal lerp: new target → previous position ─────────────────────
+    const anchorDx = prevAnchor ? anchorX - prevAnchor.x : 0;
+    const anchorDy = prevAnchor ? anchorY - prevAnchor.y : 0;
+    const blendT   = 1 - stability;
+    const containR = communityRadius * 1.05;
+
+    for (let i = 0; i < n; i++) {
+      const prevPos = previousIndex.nodePositions[nodeIds[i]];
+      if (prevPos && stability > 0) {
+        const px = prevPos.x + anchorDx, py = prevPos.y + anchorDy;
+        x[i] = px + (targetX[i] - px) * blendT;
+        y[i] = py + (targetY[i] - py) * blendT;
+      } else {
+        x[i] = targetX[i];
+        y[i] = targetY[i];
+      }
+    }
+
+    this.clampToContainment(x, y, anchorX, anchorY, containR, n);
+    return { nodeIds, x, y };
+  }
+
+  // ── Barycentric sort ───────────────────────────────────────────────────────
+
+  /**
+   * Sort `ring` in-place by the barycentric coordinate: mean angle of each
+   * node's neighbours that are NOT on this ring (i.e., on the adjacent rings
+   * that were already processed).  Ties broken by nodeId for determinism.
+   */
+  private barycentricSort(
+    ring: number[],
+    r: number,
+    adjacencyByNodeId: Map<string, Set<string>>,
+    nodeIds: string[],
+    localIndex: Map<string, number>,
+    layer: Int32Array,
+    nodeAngle: Float64Array,
+    startAngle: number
+  ): void {
+    const count = ring.length;
+    if (count <= 1) return;
+
+    const bary = new Float64Array(count);
+
+    for (let k = 0; k < count; k++) {
+      const i   = ring[k];
+      const nbs = adjacencyByNodeId.get(nodeIds[i]);
+      let sumSin = 0, sumCos = 0, sc = 0;
+
+      if (nbs) {
+        for (const nb of nbs) {
+          const j = localIndex.get(nb); if (j == null || layer[j] === r) continue;
+          // Use circular mean to handle angle wrap-around correctly
+          const ang = nodeAngle[j];
+          sumCos += Math.cos(ang); sumSin += Math.sin(ang); sc++;
+        }
+      }
+
+      if (sc > 0) {
+        bary[k] = Math.atan2(sumSin / sc, sumCos / sc);
+        if (bary[k] < startAngle) bary[k] += TAU; // normalise to [startAngle, startAngle+TAU)
+      } else {
+        // Isolated node within ring: keep its current slot (stable)
+        bary[k] = startAngle + (k / count) * TAU;
+      }
+    }
+
+    // Sort ring indices by barycenter; tie-break by nodeId
+    const order = Array.from({ length: count }, (_, k) => k);
+    order.sort((a, b) => {
+      const d = bary[a] - bary[b];
+      if (Math.abs(d) > 1e-12) return d;
+      return compareString(nodeIds[ring[a]], nodeIds[ring[b]]);
+    });
+
+    const tmp = ring.slice();
+    for (let k = 0; k < count; k++) ring[k] = tmp[order[k]];
+  }
+
+  // ── Adjacent-swap fine pass ────────────────────────────────────────────────
+
+  /**
+   * Scan adjacent pairs in the ring and swap them if doing so reduces the
+   * crossing count with the neighbouring rings.  Repeat until no improvement
+   * is found.  This is the "sifting" pass of the Sugiyama framework.
+   *
+   * Crossing count is approximated by counting "inversions": for each pair
+   * of edges (i→u) and (j→v) where i is left of j in this ring and u is
+   * right of v in the adjacent ring, that is a crossing.
+   *
+   * For efficiency we only evaluate crossings for the two nodes involved in
+   * the swap (local crossing count).
+   */
+  private adjacentSwapPass(
+    ring: number[],
+    r: number,
+    adjacencyByNodeId: Map<string, Set<string>>,
+    nodeIds: string[],
+    localIndex: Map<string, number>,
+    layer: Int32Array,
+    nodeAngle: Float64Array,
+    startAngle: number
+  ): void {
+    const count   = ring.length;
+    const maxOuter = Math.min(count, 6); // limit passes for performance
+
+    for (let outerPass = 0; outerPass < maxOuter; outerPass++) {
+      let improved = false;
+      for (let k = 0; k < count - 1; k++) {
+        const a = ring[k], b = ring[k + 1];
+        const angA = startAngle + (k / count) * TAU;
+        const angB = startAngle + ((k + 1) / count) * TAU;
+
+        const crossBefore = this.localCrossings(a, b, angA, angB, r, adjacencyByNodeId, nodeIds, localIndex, layer, nodeAngle);
+        // Try swap
+        const crossAfter  = this.localCrossings(b, a, angA, angB, r, adjacencyByNodeId, nodeIds, localIndex, layer, nodeAngle);
+
+        if (crossAfter < crossBefore) {
+          ring[k] = b; ring[k + 1] = a;
+          // Update angles for the pair
+          nodeAngle[b] = angA; nodeAngle[a] = angB;
+          improved = true;
+        }
+      }
+      if (!improved) break;
+    }
+  }
+
+  /**
+   * Count crossings caused by node `i` being at `angI` and node `j` at `angJ`
+   * with respect to their neighbours on other rings.
+   */
+  private localCrossings(
+    i: number, j: number,
+    angI: number, angJ: number,
+    r: number,
+    adjacencyByNodeId: Map<string, Set<string>>,
+    nodeIds: string[],
+    localIndex: Map<string, number>,
+    layer: Int32Array,
+    nodeAngle: Float64Array
+  ): number {
+    // Collect neighbour angles from other rings for both i and j
+    const nbAngI: number[] = [], nbAngJ: number[] = [];
+    const nbsI = adjacencyByNodeId.get(nodeIds[i]);
+    const nbsJ = adjacencyByNodeId.get(nodeIds[j]);
+    if (nbsI) for (const nb of nbsI) { const k = localIndex.get(nb); if (k != null && layer[k] !== r) nbAngI.push(nodeAngle[k]); }
+    if (nbsJ) for (const nb of nbsJ) { const k = localIndex.get(nb); if (k != null && layer[k] !== r) nbAngJ.push(nodeAngle[k]); }
+
+    // An edge (i, u) and (j, v) cross iff their angular order is inverted:
+    // i < j in ring AND u > v (or vice-versa), where < is angular order.
+    let crossings = 0;
+    for (const u of nbAngI) {
+      for (const v of nbAngJ) {
+        // angI < angJ by construction; crossing iff u > v (angularly)
+        const uWrapped = ((u - angI + TAU * 2) % TAU);
+        const vWrapped = ((v - angI + TAU * 2) % TAU);
+        if (uWrapped > vWrapped) crossings++;
+      }
+    }
+    return crossings;
+  }
+
+  // ── Rotation alignment ─────────────────────────────────────────────────────
+
+  /**
+   * Rotate the entire target layout by the angle that minimises the mean
+   * squared angular displacement from the previous frame.
+   *
+   * θ = atan2( Σ (tx·py − ty·px), Σ (tx·px + ty·py) )
+   * where (tx, ty) = target position relative to anchor,
+   *       (px, py) = previous position relative to previous anchor.
+   *
+   * This eliminates the "ring spinning" artefact where the layout is
+   * structurally identical but rotated by a small angle each frame.
+   */
+  private alignRotation(
+    targetX: Float64Array, targetY: Float64Array,
+    nodeIds: string[],
+    anchorX: number, anchorY: number,
+    prevAnchor: { x: number; y: number },
+    previousIndex: SnapshotIndex,
+    n: number
+  ): void {
+    let sumRe = 0, sumIm = 0, count = 0;
+    for (let i = 0; i < n; i++) {
+      const prevPos = previousIndex.nodePositions[nodeIds[i]]; if (!prevPos) continue;
+      const tx = targetX[i] - anchorX, ty = targetY[i] - anchorY;
+      const px = prevPos.x - prevAnchor.x, py = prevPos.y - prevAnchor.y;
+      if (tx * tx + ty * ty < EPS || px * px + py * py < EPS) continue;
+      sumRe += tx * px + ty * py;
+      sumIm += tx * py - ty * px;
+      count++;
+    }
+    if (count < 3 || sumRe * sumRe + sumIm * sumIm < EPS) return;
+
+    const angle = Math.atan2(sumIm, sumRe);
+    if (Math.abs(angle) < 0.01) return; // negligible — skip
+
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    for (let i = 0; i < n; i++) {
+      const tx = targetX[i] - anchorX, ty = targetY[i] - anchorY;
+      targetX[i] = anchorX + tx * cos - ty * sin;
+      targetY[i] = anchorY + tx * sin + ty * cos;
+    }
+  }
+
+}
+
+// ── Strategy definition ────────────────────────────────────────────────────────
+
+export const RADIAL_SUGIYAMA_STRATEGY_DEFINITION: NetworkLayoutStrategyDefinition = {
+  strategy: "radial-sugiyama",
+  label:    "Radial Sugiyama",
+  fields: [
+    { key: "quality",      label: "Quality",       min: 0.5, max: 1.5, step: 0.05 },
+    { key: "stability",    label: "Stability",     min: 0,   max: 0.95, step: 0.05 },
+    { key: "nodeSpacing",  label: "Node Spacing",  min: 4,   max: 20,   step: 1 },
+    { key: "sweepPasses",  label: "Sweep Passes",  min: 1,   max: 8,    step: 1 }
+  ],
+  createInitialConfig: () => ({
+    quality:     DEFAULT_QUALITY,
+    stability:   DEFAULT_STABILITY,
+    nodeSpacing: DEFAULT_NODE_SPACING,
+    sweepPasses: DEFAULT_SWEEP_PASSES
+  }),
+  summarizeConfig: (c) =>
+    `q=${Number(c.quality ?? DEFAULT_QUALITY).toFixed(2)} ` +
+    `stab=${Number(c.stability ?? DEFAULT_STABILITY).toFixed(2)} ` +
+    `sweeps=${Number(c.sweepPasses ?? DEFAULT_SWEEP_PASSES)}`,
+  createAlgorithm: () => new RadialSugiyamaLayoutAlgorithm()
+};

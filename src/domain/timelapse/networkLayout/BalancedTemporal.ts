@@ -40,8 +40,8 @@ type LayoutSnapshot = {
   nodePositions: Record<string, Point>;
 };
 
-export class CleanTemporalLayoutAlgorithm implements INetworkLayoutAlgorithm {
-  public readonly strategy = "clean-temporal" as const;
+export class BalancedTemporalLayoutAlgorithm implements INetworkLayoutAlgorithm {
+  public readonly strategy = "balanced-temporal" as const;
 
   public run(input: NetworkLayoutInput): NetworkLayoutOutput {
     // 1. Resolve Config
@@ -441,9 +441,9 @@ export class CleanTemporalLayoutAlgorithm implements INetworkLayoutAlgorithm {
   }
 }
 
-export const CLEAN_TEMPORAL_STRATEGY_DEFINITION: NetworkLayoutStrategyDefinition = {
-  strategy: "clean-temporal",
-  label: "Clean Temporal",
+export const BALANCED_TEMPORAL_STRATEGY_DEFINITION: NetworkLayoutStrategyDefinition = {
+  strategy: "balanced-temporal",
+  label: "Balanced Temporal",
   fields: [
     { 
       key: "quality", 
@@ -475,5 +475,5 @@ export const CLEAN_TEMPORAL_STRATEGY_DEFINITION: NetworkLayoutStrategyDefinition
   summarizeConfig: (config) => {
     return `Q:${config.quality} S:${config.stability} Sp:${config.nodeSpacing}`;
   },
-  createAlgorithm: () => new CleanTemporalLayoutAlgorithm()
+  createAlgorithm: () => new BalancedTemporalLayoutAlgorithm()
 };

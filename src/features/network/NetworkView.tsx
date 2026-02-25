@@ -516,6 +516,7 @@ export function NetworkView({
 
   const allianceNameById = useMemo(() => {
     const latestNameById = new Map<string, string>();
+    const allKnownNameById = new Map<string, string>();
 
     for (const event of allEvents) {
       if (playhead && event.timestamp > playhead) {
@@ -524,26 +525,38 @@ export function NetworkView({
 
       const fromName = event.from_alliance_name.trim();
       if (fromName) {
+        allKnownNameById.set(String(event.from_alliance_id), fromName);
         latestNameById.set(String(event.from_alliance_id), fromName);
       }
 
       const toName = event.to_alliance_name.trim();
       if (toName) {
+        allKnownNameById.set(String(event.to_alliance_id), toName);
         latestNameById.set(String(event.to_alliance_id), toName);
       }
     }
 
-    if (latestNameById.size === 0) {
-      for (const event of allEvents) {
+    for (const event of allEvents) {
+      const fromId = String(event.from_alliance_id);
+      if (!latestNameById.has(fromId)) {
         const fromName = event.from_alliance_name.trim();
         if (fromName) {
-          latestNameById.set(String(event.from_alliance_id), fromName);
+          allKnownNameById.set(fromId, fromName);
         }
+      }
 
+      const toId = String(event.to_alliance_id);
+      if (!latestNameById.has(toId)) {
         const toName = event.to_alliance_name.trim();
         if (toName) {
-          latestNameById.set(String(event.to_alliance_id), toName);
+          allKnownNameById.set(toId, toName);
         }
+      }
+    }
+
+    for (const [id, name] of allKnownNameById.entries()) {
+      if (!latestNameById.has(id)) {
+        latestNameById.set(id, name);
       }
     }
 

@@ -43,7 +43,7 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
 
     const previousSnapshot = this.asLayoutSnapshot(input.previousState);
     const components = this.assignStableComponentIds(componentsRaw, previousSnapshot);
-    const componentAnchors = this.resolveComponentAnchors(components, previousSnapshot);
+    const componentAnchors = this.resolveComponentAnchors(components, previousSnapshot, communityPlacementScale);
 
     const componentTargets: WorkerComponentTarget[] = [];
     const communityTargets: WorkerCommunityTarget[] = [];
@@ -53,6 +53,19 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
 
     for (const component of components) {
       const componentAnchor = componentAnchors.get(component.componentId) ?? { x: 0, y: 0 };
+      
+      let deltaComponentX = 0;
+      let deltaComponentY = 0;
+      if (previousSnapshot) {
+        for (const prev of previousSnapshot.components) {
+          if (prev.componentId === component.componentId) {
+            deltaComponentX = componentAnchor.x - prev.anchorX;
+            deltaComponentY = componentAnchor.y - prev.anchorY;
+            break;
+          }
+        }
+      }
+
       componentTargets.push({
         componentId: component.componentId,
         nodeIds: component.nodeIds,
@@ -67,19 +80,22 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
         anchorY: componentAnchor.y
       });
 
-      const communitiesRaw = this.computeCommunities(component.nodeIds, sortedAdjacency);
+      const communitiesRaw = this.computeCommunities(component.nodeIds, sortedAdjacency, previousSnapshot);
       const communities = this.assignStableCommunityIds(
         component.componentId,
         communitiesRaw,
         previousSnapshot
       );
+      
       const communityAnchors = new Map<string, { x: number; y: number }>();
       const componentCommunityTargets: WorkerCommunityTarget[] = [];
       const communityRadii: number[] = [];
+      
       for (const community of communities) {
         const communityNodeIds = community.nodeIds;
         communityRadii.push(7 + Math.sqrt(communityNodeIds.length) * 3.6);
       }
+      
       const largestCommunityRadius = communityRadii.length > 0 ? Math.max(...communityRadii) : 0;
       const communityPlacementRadius =
         (12 + largestCommunityRadius * 1.4 + Math.sqrt(communities.length) * 7) * communityPlacementScale;
@@ -90,12 +106,23 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
         const communityId = community.communityId;
         const angleSeed = this.hashId(`${communityId}:angle`) % 360;
         const angle = communities.length <= 1 ? 0 : (((index * 53 + angleSeed) % 360) / 360) * TAU;
+        
         const previousAnchor = this.resolvePreviousCommunityAnchor(previousSnapshot, communityId);
-        const anchor =
-          previousAnchor ?? {
-            x: componentAnchor.x + Math.cos(angle) * communityPlacementRadius,
-            y: componentAnchor.y + Math.sin(angle) * communityPlacementRadius
-          };
+        
+        const idealX = componentAnchor.x + Math.cos(angle) * communityPlacementRadius;
+        const idealY = componentAnchor.y + Math.sin(angle) * communityPlacementRadius;
+        let anchorX = idealX;
+        let anchorY = idealY;
+
+        if (previousAnchor) {
+          const shiftedX = previousAnchor.x + deltaComponentX;
+          const shiftedY = previousAnchor.y + deltaComponentY;
+          // Smoothly interpolate 15% towards ideal to self-correct layout over time without jumping
+          anchorX = shiftedX + (idealX - shiftedX) * 0.15;
+          anchorY = shiftedY + (idealY - shiftedY) * 0.15;
+        }
+
+        const anchor = { x: anchorX, y: anchorY };
         communityAnchors.set(communityId, anchor);
 
         const target: WorkerCommunityTarget = {
@@ -118,18 +145,47 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
 
       for (const community of componentCommunityTargets) {
         const anchor = communityAnchors.get(community.communityId)!;
-        const adaptiveRefinementCap =
-          community.nodeIds.length >= 220 ? 4 : community.nodeIds.length >= 120 ? 5 : community.nodeIds.length >= 60 ? 6 : 8;
+        const initialPositions = new Map<string, { x: number; y: number }>();
+        
+        for (const nodeId of community.nodeIds) {
+          const prevPos = previousSnapshot?.nodePositions[nodeId];
+          if (prevPos) {
+            let prevAnchorX = 0;
+            let prevAnchorY = 0;
+            let foundPrevAnchor = false;
+            if (previousSnapshot) {
+              for (const prevComm of previousSnapshot.communities) {
+                if (prevComm.members.has(nodeId)) {
+                  prevAnchorX = prevComm.anchorX;
+                  prevAnchorY = prevComm.anchorY;
+                  foundPrevAnchor = true;
+                  break;
+                }
+              }
+            }
+            if (foundPrevAnchor) {
+              // Lock into relative positioning so communities can fluidly shift screen locations
+              initialPositions.set(nodeId, {
+                x: anchor.x + (prevPos.x - prevAnchorX),
+                y: anchor.y + (prevPos.y - prevAnchorY)
+              });
+            } else {
+              initialPositions.set(nodeId, prevPos);
+            }
+          }
+        }
+
         const refined = this.refineCommunityTargets({
           communityNodeIds: community.nodeIds,
           sortedAdjacencyByNodeId: sortedAdjacency,
-          previousNodePositions: previousSnapshot?.nodePositions ?? {},
+          initialPositions,
           anchorX: anchor.x,
           anchorY: anchor.y,
           componentId: component.componentId,
           communityId: community.communityId,
-          refinementIterations: Math.max(2, Math.min(refinementIterations, adaptiveRefinementCap))
+          refinementIterations: Math.max(2, refinementIterations)
         });
+        
         for (const nodeTarget of refined) {
           nodeTargets.push(nodeTarget);
           nextSnapshot.nodePositions[nodeTarget.nodeId] = { x: nodeTarget.targetX, y: nodeTarget.targetY };
@@ -340,11 +396,29 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
     return components;
   }
 
-  private computeCommunities(componentNodeIds: string[], sortedAdjacencyByNodeId: Map<string, string[]>): string[][] {
+  private computeCommunities(
+    componentNodeIds: string[], 
+    sortedAdjacencyByNodeId: Map<string, string[]>,
+    previousSnapshot: LayoutSnapshot | undefined
+  ): string[][] {
     const labels = new Map<string, string>();
     const sortedNodeIds = [...componentNodeIds].sort((left, right) => left.localeCompare(right));
-    for (const nodeId of sortedNodeIds) {
-      labels.set(nodeId, nodeId);
+    
+    // Warm-start labels to heavily prevent component/community jittering
+    if (previousSnapshot) {
+      const nodeToPrevCommunity = new Map<string, string>();
+      for (const comm of previousSnapshot.communities) {
+        for (const member of comm.members) {
+          nodeToPrevCommunity.set(member, comm.communityId);
+        }
+      }
+      for (const nodeId of sortedNodeIds) {
+        labels.set(nodeId, nodeToPrevCommunity.get(nodeId) ?? nodeId);
+      }
+    } else {
+      for (const nodeId of sortedNodeIds) {
+        labels.set(nodeId, nodeId);
+      }
     }
 
     const maxIterations = Math.max(2, Math.min(10, Math.ceil(Math.log2(componentNodeIds.length + 1)) + 2));
@@ -531,7 +605,7 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
   }
 
   private componentRadius(weight: number): number {
-    return 12 + Math.sqrt(Math.max(weight, 1)) * 4.5;
+    return 30 + Math.sqrt(Math.max(weight, 1)) * 10;
   }
 
   private isAnchorPlacementFree(
@@ -584,7 +658,8 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
 
   private resolveComponentAnchors(
     components: Array<{ componentId: string; nodeIds: string[]; weight: number }>,
-    previousSnapshot: LayoutSnapshot | undefined
+    previousSnapshot: LayoutSnapshot | undefined,
+    communityPlacementScale: number
   ): Map<string, { x: number; y: number }> {
     const anchors = new Map<string, { x: number; y: number; radius: number }>();
     const claimedPrevious = new Set<string>();
@@ -594,7 +669,7 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
     );
 
     for (const component of componentsSorted) {
-      const targetRadius = this.componentRadius(component.weight);
+      const targetRadius = this.componentRadius(component.weight) * Math.max(1, communityPlacementScale);
       const deterministicSeed = this.hashId(component.componentId) % 31;
       let preferred = { x: 0, y: 0 };
       let hasPreferred = false;
@@ -665,7 +740,7 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
   private refineCommunityTargets(params: {
     communityNodeIds: string[];
     sortedAdjacencyByNodeId: Map<string, string[]>;
-    previousNodePositions: Record<string, { x: number; y: number }>;
+    initialPositions: Map<string, { x: number; y: number }>;
     anchorX: number;
     anchorY: number;
     componentId: string;
@@ -675,13 +750,14 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
     const {
       communityNodeIds,
       sortedAdjacencyByNodeId,
-      previousNodePositions,
+      initialPositions,
       anchorX,
       anchorY,
       componentId,
       communityId,
       refinementIterations
     } = params;
+    
     const sortedNodeIds = [...communityNodeIds].sort((left, right) => left.localeCompare(right));
     const nodeIdSet = new Set(sortedNodeIds);
     const positions = new Map<string, { x: number; y: number }>();
@@ -689,9 +765,9 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
 
     for (let index = 0; index < sortedNodeIds.length; index += 1) {
       const nodeId = sortedNodeIds[index];
-      const previous = previousNodePositions[nodeId];
-      if (previous) {
-        positions.set(nodeId, { x: previous.x, y: previous.y });
+      const initial = initialPositions.get(nodeId);
+      if (initial) {
+        positions.set(nodeId, { x: initial.x, y: initial.y });
         continue;
       }
       const seed = this.hashId(`${communityId}:${nodeId}`);
@@ -704,12 +780,14 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
       });
     }
 
-    const gridSize = 12;
     const neighborAttract = 0.2;
     const anchorPull = 0.04;
     const repulsionStrength = 1.15;
-    const maxStep = 4.2;
+    const maxStep = Math.max(4.2, seedRadius * 0.15);
     const repulsionCutoff = Math.max(18, seedRadius * 1.8);
+    
+    // Ensure grid is wide enough to capture all overlapping repulsions
+    const gridSize = Math.max(12, repulsionCutoff); 
     const minNodeGap = 2.6;
 
     for (let iteration = 0; iteration < refinementIterations; iteration += 1) {
@@ -776,7 +854,16 @@ export class HybridBackboneLayoutAlgorithm implements INetworkLayoutAlgorithm {
               const dx = current.x - other.x;
               const dy = current.y - other.y;
               const d2 = dx * dx + dy * dy;
-              if (d2 <= 0.0001 || d2 > repulsionCutoff * repulsionCutoff) {
+              
+              if (d2 <= 0.0001) {
+                // Determine a safe, pseudo-random but highly stable displacement avoiding node tangling 
+                const jx = (this.hashId(nodeId + candidateId) % 100) / 50 - 1;
+                const jy = (this.hashId(candidateId + nodeId) % 100) / 50 - 1;
+                velocityX += jx * 0.5;
+                velocityY += jy * 0.5;
+                continue;
+              }
+              if (d2 > repulsionCutoff * repulsionCutoff) {
                 continue;
               }
               const distance = Math.sqrt(d2);
