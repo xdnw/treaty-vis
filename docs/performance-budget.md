@@ -42,6 +42,9 @@ Key metrics currently tracked:
 - `deriveNetworkEdges`
 - `buildPulseSeries`
 - `app.buildPulseSeries`
+- `network.graph.build`
+- `network.renderer.refresh`
+- `network.flagSprites.draw`
 - `timeline.datazoom.flush`
 - `filter.text.debounced`
 - `playhead.input`

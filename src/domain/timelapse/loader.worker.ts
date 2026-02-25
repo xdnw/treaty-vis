@@ -14,6 +14,8 @@ type WorkerLoadedState = {
   includeFlags: boolean;
 };
 
+type WorkerBasePayload = Omit<LoaderWorkerPayload, "allianceFlagsRaw" | "flagAssetsRaw">;
+
 type WorkerEvent = {
   event_id: string;
   action: string;
@@ -157,33 +159,11 @@ function buildIndexPayload(events: unknown[]) {
   };
 }
 
-async function loadPayload(includeFlags: boolean): Promise<LoaderWorkerPayload> {
-  const [eventsRaw, summaryRaw, flagsRaw, allianceFlagsRaw, flagAssetsRaw, scoresRaw, manifestRaw] = await Promise.all([
+async function loadBasePayload(): Promise<WorkerBasePayload> {
+  const [eventsRaw, summaryRaw, flagsRaw, scoresRaw, manifestRaw] = await Promise.all([
     fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled.msgpack"),
     fetchMsgpack<unknown>("/data/treaty_changes_reconciled_summary.msgpack"),
     fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled_flags.msgpack"),
-    includeFlags
-      ? fetch("/data/flags.msgpack")
-          .then(async (response) => {
-            if (!response.ok) {
-              return null;
-            }
-            const body = await response.arrayBuffer();
-            return decode(new Uint8Array(body)) as unknown;
-          })
-          .catch(() => null)
-      : Promise.resolve(null),
-    includeFlags
-      ? fetch("/data/flag_assets.msgpack")
-          .then(async (response) => {
-            if (!response.ok) {
-              return null;
-            }
-            const body = await response.arrayBuffer();
-            return decode(new Uint8Array(body)) as unknown;
-          })
-          .catch(() => null)
-      : Promise.resolve(null),
     fetch("/data/alliance_scores_daily.msgpack")
       .then(async (response) => {
         if (!response.ok) {
@@ -210,10 +190,36 @@ async function loadPayload(includeFlags: boolean): Promise<LoaderWorkerPayload> 
     indicesRaw: buildIndexPayload(sorted),
     summaryRaw,
     flagsRaw,
-    allianceFlagsRaw,
-    flagAssetsRaw,
     scoresRaw,
     manifestRaw
+  };
+}
+
+async function loadOptionalFlagPayload(): Promise<Pick<LoaderWorkerPayload, "allianceFlagsRaw" | "flagAssetsRaw">> {
+  const [allianceFlagsRaw, flagAssetsRaw] = await Promise.all([
+    fetch("/data/flags.msgpack")
+      .then(async (response) => {
+        if (!response.ok) {
+          return null;
+        }
+        const body = await response.arrayBuffer();
+        return decode(new Uint8Array(body)) as unknown;
+      })
+      .catch(() => null),
+    fetch("/data/flag_assets.msgpack")
+      .then(async (response) => {
+        if (!response.ok) {
+          return null;
+        }
+        const body = await response.arrayBuffer();
+        return decode(new Uint8Array(body)) as unknown;
+      })
+      .catch(() => null)
+  ]);
+
+  return {
+    allianceFlagsRaw,
+    flagAssetsRaw
   };
 }
 
@@ -357,7 +363,6 @@ function selectionKey(query: WorkerQueryState): string {
     query.filters.includeNoise ? "1" : "0",
     query.filters.evidenceMode,
     query.filters.sizeByScore ? "1" : "0",
-    query.filters.showFlags ? "1" : "0",
     query.textQuery.trim().toLowerCase(),
     query.sort.field,
     query.sort.direction
@@ -700,16 +705,52 @@ async function ensureLoadedState(includeFlags: boolean): Promise<WorkerLoadedSta
   if (loadedState && (!includeFlags || loadedState.includeFlags)) {
     return loadedState;
   }
-  const payload = await loadPayload(includeFlags);
-  const allEventIndexes = new Array(payload.eventsRaw.length);
-  for (let index = 0; index < payload.eventsRaw.length; index += 1) {
-    allEventIndexes[index] = index;
+
+  if (!loadedState) {
+    const basePayload = await loadBasePayload();
+    const payload: LoaderWorkerPayload = {
+      ...basePayload,
+      allianceFlagsRaw: null,
+      flagAssetsRaw: null
+    };
+    const allEventIndexes = new Array(payload.eventsRaw.length);
+    for (let index = 0; index < payload.eventsRaw.length; index += 1) {
+      allEventIndexes[index] = index;
+    }
+    loadedState = { payload, allEventIndexes, includeFlags: false };
+    selectionCache.clear();
+    pulseCache.clear();
+    networkCache.clear();
   }
-  loadedState = { payload, allEventIndexes, includeFlags };
-  selectionCache.clear();
-  pulseCache.clear();
-  networkCache.clear();
+
+  if (includeFlags && loadedState && !loadedState.includeFlags) {
+    const optionalPayload = await loadOptionalFlagPayload();
+    loadedState = {
+      ...loadedState,
+      includeFlags: true,
+      payload: {
+        ...loadedState.payload,
+        ...optionalPayload
+      }
+    };
+  }
+
   return loadedState;
+}
+
+function payloadForMode(
+  payload: LoaderWorkerPayload,
+  includeFlags: boolean
+): LoaderWorkerPayload {
+  if (includeFlags) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    allianceFlagsRaw: null,
+    flagAssetsRaw: null
+  };
 }
 
 workerScope.addEventListener("message", async (event: MessageEvent<LoaderWorkerRequest>) => {
@@ -718,7 +759,11 @@ workerScope.addEventListener("message", async (event: MessageEvent<LoaderWorkerR
   if (request.kind === "load") {
     try {
       const state = await ensureLoadedState(request.includeFlags);
-      const response: LoaderWorkerResponse = { kind: "load", ok: true, payload: state.payload };
+      const response: LoaderWorkerResponse = {
+        kind: "load",
+        ok: true,
+        payload: payloadForMode(state.payload, request.includeFlags)
+      };
       workerScope.postMessage(response);
     } catch (reason) {
       const response: LoaderWorkerResponse = {

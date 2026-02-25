@@ -33,4 +33,20 @@ describe("filterStore anchor URL state", () => {
     const parsed = deserializeQueryState("?anchors=4,10,25");
     expect(parsed.filters?.anchoredAllianceIds).toEqual([4, 10, 25]);
   });
+
+  it("keeps showFlags default off when param is absent", () => {
+    const parsed = deserializeQueryState("");
+    expect(parsed.filters?.showFlags).toBe(false);
+  });
+
+  it("round-trips showFlags only when enabled", () => {
+    const query = makeQuery();
+    query.filters.showFlags = true;
+
+    const serialized = serializeQueryState(query);
+    expect(serialized).toContain("showFlags=1");
+
+    const parsed = deserializeQueryState(`?${serialized}`);
+    expect(parsed.filters?.showFlags).toBe(true);
+  });
 });

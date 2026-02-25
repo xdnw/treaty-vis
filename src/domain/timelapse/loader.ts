@@ -73,7 +73,8 @@ type PendingNetworkRequest = {
 type TimelapseLoadMode = "flags-on" | "flags-off";
 
 const bundlePromiseByMode = new Map<TimelapseLoadMode, Promise<TimelapseDataBundle>>();
-const workerLoadPromiseByMode = new Map<TimelapseLoadMode, Promise<RawTimelapsePayload>>();
+let workerBaseLoadPromise: Promise<RawTimelapsePayload> | null = null;
+let workerFlagsLoadPromise: Promise<RawTimelapsePayload> | null = null;
 let workerLoadError: Error | null = null;
 let selectionRequestId = 0;
 let pulseRequestId = 0;
@@ -374,7 +375,8 @@ function createWorker(): Worker {
     pendingNetworkRequests.clear();
     workerInstance?.terminate();
     workerInstance = null;
-    workerLoadPromiseByMode.clear();
+    workerBaseLoadPromise = null;
+    workerFlagsLoadPromise = null;
     workerLoadError = new Error("Loader worker failed");
   };
 
@@ -416,8 +418,6 @@ function toWorkerQueryState(query: QueryState): WorkerQueryState {
 }
 
 async function loadTimelapsePayloadInWorker(showFlags: boolean): Promise<RawTimelapsePayload> {
-  const mode = modeForShowFlags(showFlags);
-
   if (typeof Worker === "undefined") {
     return loadTimelapsePayloadOnMainThread(showFlags);
   }
@@ -426,9 +426,12 @@ async function loadTimelapsePayloadInWorker(showFlags: boolean): Promise<RawTime
     return loadTimelapsePayloadOnMainThread(showFlags);
   }
 
-  const existing = workerLoadPromiseByMode.get(mode);
-  if (existing) {
-    return existing;
+  if (!showFlags && workerBaseLoadPromise) {
+    return workerBaseLoadPromise;
+  }
+
+  if (showFlags && workerFlagsLoadPromise) {
+    return workerFlagsLoadPromise;
   }
 
   const nextPromise = new Promise<RawTimelapsePayload>((resolve, reject) => {
@@ -451,12 +454,20 @@ async function loadTimelapsePayloadInWorker(showFlags: boolean): Promise<RawTime
       const request: LoaderWorkerRequest = { kind: "load", includeFlags: showFlags };
       worker.postMessage(request);
     }).catch((error) => {
-      workerLoadPromiseByMode.delete(mode);
+      if (showFlags) {
+        workerFlagsLoadPromise = null;
+      } else {
+        workerBaseLoadPromise = null;
+      }
       workerLoadError = error instanceof Error ? error : new Error("Loader worker failed");
       return loadTimelapsePayloadOnMainThread(showFlags);
     });
 
-  workerLoadPromiseByMode.set(mode, nextPromise);
+  if (showFlags) {
+    workerFlagsLoadPromise = nextPromise;
+  } else {
+    workerBaseLoadPromise = nextPromise;
+  }
   return nextPromise;
 }
 
@@ -554,6 +565,60 @@ type CachedBundle = {
   bundle: TimelapseDataBundle;
   cachedAt: string;
 };
+
+function stripOptionalBundle(bundle: TimelapseDataBundle): TimelapseDataBundle {
+  if (bundle.allianceFlagsPayload === null && bundle.flagAssetsPayload === null) {
+    return bundle;
+  }
+
+  return {
+    ...bundle,
+    allianceFlagsPayload: null,
+    flagAssetsPayload: null,
+    allianceFlagTimelines: {}
+  };
+}
+
+function parseOptionalFlagArtifacts(
+  allianceFlagsRaw: unknown | null,
+  flagAssetsRaw: unknown | null,
+  showFlags: boolean
+): Pick<TimelapseDataBundle, "allianceFlagsPayload" | "flagAssetsPayload" | "allianceFlagTimelines"> {
+  if (!showFlags) {
+    return {
+      allianceFlagsPayload: null,
+      flagAssetsPayload: null,
+      allianceFlagTimelines: {}
+    };
+  }
+
+  const parsedAllianceFlags = allianceFlagsRaw ? allianceFlagsPayloadSchema.safeParse(allianceFlagsRaw) : null;
+  const allianceFlagsPayload = parsedAllianceFlags?.success ? parsedAllianceFlags.data : null;
+  if (allianceFlagsRaw && parsedAllianceFlags && !parsedAllianceFlags.success) {
+    console.warn("Ignoring invalid optional alliance flags dataset", parsedAllianceFlags.error.message);
+  }
+
+  const parsedFlagAssets = flagAssetsRaw ? flagAssetsPayloadSchema.safeParse(flagAssetsRaw) : null;
+  const flagAssetsPayload = parsedFlagAssets?.success ? parsedFlagAssets.data : null;
+  if (flagAssetsRaw && parsedFlagAssets && !parsedFlagAssets.success) {
+    console.warn("Ignoring invalid optional flag assets dataset", parsedFlagAssets.error.message);
+  }
+
+  return {
+    allianceFlagsPayload,
+    flagAssetsPayload,
+    allianceFlagTimelines: normalizeAllianceFlagTimelines(allianceFlagsPayload)
+  };
+}
+
+async function enrichBundleWithOptionalFlags(baseBundle: TimelapseDataBundle): Promise<TimelapseDataBundle> {
+  const payload = await loadTimelapsePayloadInWorker(true);
+  const optional = parseOptionalFlagArtifacts(payload.allianceFlagsRaw, payload.flagAssetsRaw, true);
+  return {
+    ...baseBundle,
+    ...optional
+  };
+}
 
 function manifestCacheIdentity(manifest: TimelapseManifest): string {
   const fileIdentity = Object.entries(manifest.files)
@@ -699,19 +764,11 @@ async function loadTimelapseBundleImpl(showFlags: boolean): Promise<TimelapseDat
 
   const indices = hydrateIndices(events, indicesRaw);
 
-  const parsedAllianceFlags = allianceFlagsRaw ? allianceFlagsPayloadSchema.safeParse(allianceFlagsRaw) : null;
-  const allianceFlagsPayload = parsedAllianceFlags?.success ? parsedAllianceFlags.data : null;
-  if (allianceFlagsRaw && parsedAllianceFlags && !parsedAllianceFlags.success) {
-    console.warn("Ignoring invalid optional alliance flags dataset", parsedAllianceFlags.error.message);
-  }
-
-  const parsedFlagAssets = flagAssetsRaw ? flagAssetsPayloadSchema.safeParse(flagAssetsRaw) : null;
-  const flagAssetsPayload = parsedFlagAssets?.success ? parsedFlagAssets.data : null;
-  if (flagAssetsRaw && parsedFlagAssets && !parsedFlagAssets.success) {
-    console.warn("Ignoring invalid optional flag assets dataset", parsedFlagAssets.error.message);
-  }
-
-  const allianceFlagTimelines = normalizeAllianceFlagTimelines(allianceFlagsPayload);
+  const { allianceFlagsPayload, flagAssetsPayload, allianceFlagTimelines } = parseOptionalFlagArtifacts(
+    allianceFlagsRaw,
+    flagAssetsRaw,
+    showFlags
+  );
 
   const parsedScores = scoresRaw ? allianceScoresDailySchema.safeParse(scoresRaw) : null;
   const allianceScoresByDay = parsedScores?.success ? parsedScores.data.scores_by_day : null;
@@ -744,6 +801,29 @@ export function loadTimelapseBundle(options?: TimelapseLoadOptions): Promise<Tim
   const existing = bundlePromiseByMode.get(mode);
   if (existing) {
     return existing;
+  }
+
+  if (!showFlags) {
+    const existingOn = bundlePromiseByMode.get("flags-on");
+    if (existingOn) {
+      const derivedOff = existingOn.then((bundle) => stripOptionalBundle(bundle));
+      bundlePromiseByMode.set("flags-off", derivedOff);
+      return derivedOff;
+    }
+  }
+
+  if (showFlags) {
+    const existingOff = bundlePromiseByMode.get("flags-off");
+    if (existingOff) {
+      const upgradedOn = existingOff
+        .then((bundle) => enrichBundleWithOptionalFlags(bundle))
+        .catch((error) => {
+          bundlePromiseByMode.delete("flags-on");
+          throw error;
+        });
+      bundlePromiseByMode.set("flags-on", upgradedOn);
+      return upgradedOn;
+    }
   }
 
   const nextPromise = loadTimelapseBundleImpl(showFlags).catch((error) => {

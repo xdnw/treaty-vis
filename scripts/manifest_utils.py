@@ -13,6 +13,9 @@ WEB_MANIFEST_FILES = [
 	"treaty_changes_reconciled_summary.msgpack",
 	"treaty_changes_reconciled_flags.msgpack",
 	"flags.msgpack",
+	"flag_assets.msgpack",
+	"flag_atlas.webp",
+	"flag_atlas.png",
 	"alliance_scores_daily.msgpack",
 ]
 
