@@ -49,7 +49,11 @@ CANONICAL_TYPES = {
 	"PIAT",
 	"PROTECTORATE",
 }
-TERMINAL_ACTIONS = {"cancelled", "expired", "ended", "inferred_cancelled"}
+TERMINAL_ACTIONS = {"cancelled", "expired", "ended", "terminated", "termination", "inferred_cancelled"}
+TERMINAL_ACTION_ALIASES = {
+	"terminated": "ended",
+	"termination": "ended",
+}
 
 
 @dataclass
@@ -178,10 +182,18 @@ def clean_alliance_name(raw: Any) -> str:
 	return text
 
 
+def normalize_action(raw: Any) -> str:
+	action = str(raw or "").strip().lower()
+	if not action:
+		return ""
+	return TERMINAL_ACTION_ALIASES.get(action, action)
+
+
 def event_id(payload: dict[str, Any]) -> str:
 	blob = "|".join(
 		[
 			str(payload.get("timestamp", "")),
+			str(payload.get("event_sequence", "")),
 			str(payload.get("action", "")),
 			str(payload.get("treaty_type", "")),
 			str(payload.get("pair_min_id", "")),
@@ -293,7 +305,7 @@ def load_bot_events(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, An
 	events: list[dict[str, Any]] = []
 	flags: list[dict[str, Any]] = []
 	for idx, rec in enumerate(records):
-		action = str(rec.get("action") or "").strip().lower()
+		action = normalize_action(rec.get("action"))
 		if not action:
 			flags.append({"severity": "warning", "flag": "missing_action", "record_index": idx})
 			continue
@@ -442,6 +454,8 @@ def build_grounding_lookup(snapshots: list[SnapshotState]) -> list[tuple[datetim
 def grounded_count(lookup: list[tuple[datetime, set[int]]], when: datetime, aid: int) -> bool:
 	if not lookup:
 		return False
+	if when < lookup[0][0]:
+		return False
 	idx = 0
 	for i, (ts, _) in enumerate(lookup):
 		if ts <= when:
@@ -466,7 +480,7 @@ def infer_type_if_needed(
 	active: dict[tuple[int, int], dict[str, TreatyState]],
 	flags: list[dict[str, Any]],
 ) -> str:
-	action = str(event.get("action") or "")
+	action = normalize_action(event.get("action"))
 	type_norm = norm_treaty_type(event.get("treaty_type"))
 	if type_norm and type_norm != "UNKNOWN":
 		return type_norm
@@ -533,6 +547,14 @@ def reconcile_events(
 	active: dict[tuple[int, int], dict[str, TreatyState]] = defaultdict(dict)
 	alliance_names: dict[int, str] = {}
 	out: list[dict[str, Any]] = []
+	next_event_sequence = 0
+
+	def append_record(record: dict[str, Any]) -> None:
+		nonlocal next_event_sequence
+		record["event_sequence"] = next_event_sequence
+		next_event_sequence += 1
+		record["event_id"] = event_id(record)
+		out.append(record)
 
 	def remember_name(aid: int, name_raw: Any) -> None:
 		name = clean_alliance_name(name_raw)
@@ -557,30 +579,30 @@ def reconcile_events(
 					keep = should_keep_by_top50(top50_mode, grounded_from, grounded_to)
 					from_name = resolve_name(pair[0])
 					to_name = resolve_name(pair[1])
-					record = {
-						"timestamp": dt_to_iso(state.expires_at),
-						"action": "inferred_cancelled",
-						"treaty_type": treaty_type,
-						"from_alliance_id": pair[0],
-						"from_alliance_name": from_name,
-						"to_alliance_id": pair[1],
-						"to_alliance_name": to_name,
-						"pair_min_id": pair[0],
-						"pair_max_id": pair[1],
-						"source": "expiry_inferred",
-						"source_ref": state.last_event_id,
-						"confidence": "low",
-						"inferred": True,
-						"inference_reason": "time_remaining_elapsed_without_terminal_event",
-						"time_remaining_turns": None,
-						"grounded_from": grounded_from,
-						"grounded_to": grounded_to,
-						"grounded_keep": keep,
-						"noise_filtered": False,
-						"noise_reason": None,
-					}
-					record["event_id"] = event_id(record)
-					out.append(record)
+					append_record(
+						{
+							"timestamp": dt_to_iso(state.expires_at),
+							"action": "inferred_cancelled",
+							"treaty_type": treaty_type,
+							"from_alliance_id": pair[0],
+							"from_alliance_name": from_name,
+							"to_alliance_id": pair[1],
+							"to_alliance_name": to_name,
+							"pair_min_id": pair[0],
+							"pair_max_id": pair[1],
+							"source": "expiry_inferred",
+							"source_ref": state.last_event_id,
+							"confidence": "low",
+							"inferred": True,
+							"inference_reason": "time_remaining_elapsed_without_terminal_event",
+							"time_remaining_turns": None,
+							"grounded_from": grounded_from,
+							"grounded_to": grounded_to,
+							"grounded_keep": keep,
+							"noise_filtered": False,
+							"noise_reason": None,
+						}
+					)
 					del by_type[treaty_type]
 			if not by_type:
 				del active[pair]
@@ -606,36 +628,36 @@ def reconcile_events(
 					keep = should_keep_by_top50(top50_mode, grounded_from, grounded_to)
 					from_name = resolve_name(pair[0])
 					to_name = resolve_name(pair[1])
-					rec = {
-						"timestamp": raw["timestamp"],
-						"action": "inferred_cancelled",
-						"treaty_type": treaty_type,
-						"from_alliance_id": pair[0],
-						"from_alliance_name": from_name,
-						"to_alliance_id": pair[1],
-						"to_alliance_name": to_name,
-						"pair_min_id": pair[0],
-						"pair_max_id": pair[1],
-						"source": "deletion_inferred",
-						"source_ref": raw.get("source_ref"),
-						"confidence": "medium",
-						"inferred": True,
-						"inference_reason": "alliance_membership_zero",
-						"time_remaining_turns": None,
-						"grounded_from": grounded_from,
-						"grounded_to": grounded_to,
-						"grounded_keep": keep,
-						"noise_filtered": False,
-						"noise_reason": None,
-					}
-					rec["event_id"] = event_id(rec)
-					out.append(rec)
+					append_record(
+						{
+							"timestamp": raw["timestamp"],
+							"action": "inferred_cancelled",
+							"treaty_type": treaty_type,
+							"from_alliance_id": pair[0],
+							"from_alliance_name": from_name,
+							"to_alliance_id": pair[1],
+							"to_alliance_name": to_name,
+							"pair_min_id": pair[0],
+							"pair_max_id": pair[1],
+							"source": "deletion_inferred",
+							"source_ref": raw.get("source_ref"),
+							"confidence": "medium",
+							"inferred": True,
+							"inference_reason": "alliance_membership_zero",
+							"time_remaining_turns": None,
+							"grounded_from": grounded_from,
+							"grounded_to": grounded_to,
+							"grounded_keep": keep,
+							"noise_filtered": False,
+							"noise_reason": None,
+						}
+					)
 					del by_type[treaty_type]
 				if not by_type:
 					del active[pair]
 			continue
 
-		action = str(raw.get("action") or "").lower()
+		action = normalize_action(raw.get("action"))
 		pair = (int(raw["pair_min_id"]), int(raw["pair_max_id"]))
 		type_norm = infer_type_if_needed(raw, active, flags)
 		if not type_norm:
@@ -667,7 +689,7 @@ def reconcile_events(
 				last_event_id=str(raw.get("source_ref") or ""),
 			)
 			active[pair][type_norm] = new_state
-		elif action in {"extended"}:
+		elif action == "extended":
 			expires_at = maybe_expiry_ts(current_ts, raw.get("time_remaining_turns"))
 			if type_norm not in active[pair]:
 				active[pair][type_norm] = TreatyState(
@@ -694,33 +716,39 @@ def reconcile_events(
 		from_name = resolve_name(from_id, raw.get("from_alliance_name"))
 		to_name = resolve_name(to_id, raw.get("to_alliance_name"))
 
-		record = {
-			"timestamp": raw["timestamp"],
-			"action": action,
-			"treaty_type": type_norm,
-			"from_alliance_id": from_id,
-			"from_alliance_name": from_name,
-			"to_alliance_id": to_id,
-			"to_alliance_name": to_name,
-			"pair_min_id": pair[0],
-			"pair_max_id": pair[1],
-			"source": raw.get("source"),
-			"source_ref": raw.get("source_ref"),
-			"confidence": raw.get("confidence"),
-			"inferred": bool(raw.get("inferred")),
-			"inference_reason": raw.get("inference_reason"),
-			"time_remaining_turns": raw.get("time_remaining_turns"),
-			"grounded_from": grounded_from,
-			"grounded_to": grounded_to,
-			"grounded_keep": keep,
-			"noise_filtered": False,
-			"noise_reason": None,
-		}
-		record["event_id"] = event_id(record)
-		out.append(record)
+		append_record(
+			{
+				"timestamp": raw["timestamp"],
+				"action": action,
+				"treaty_type": type_norm,
+				"from_alliance_id": from_id,
+				"from_alliance_name": from_name,
+				"to_alliance_id": to_id,
+				"to_alliance_name": to_name,
+				"pair_min_id": pair[0],
+				"pair_max_id": pair[1],
+				"source": raw.get("source"),
+				"source_ref": raw.get("source_ref"),
+				"confidence": raw.get("confidence"),
+				"inferred": bool(raw.get("inferred")),
+				"inference_reason": raw.get("inference_reason"),
+				"time_remaining_turns": raw.get("time_remaining_turns"),
+				"grounded_from": grounded_from,
+				"grounded_to": grounded_to,
+				"grounded_keep": keep,
+				"noise_filtered": False,
+				"noise_reason": None,
+			}
+		)
 
 	flush_expired(datetime.max.replace(tzinfo=timezone.utc))
-	out.sort(key=lambda item: (parse_dt(item["timestamp"]), str(item.get("event_id"))))
+	out.sort(
+		key=lambda item: (
+			parse_dt(item["timestamp"]),
+			int(item.get("event_sequence", -1)),
+			str(item.get("event_id")),
+		)
+	)
 	return out, flags
 
 

@@ -89,17 +89,24 @@ VALID_ACTIONS = {
 	"expired",
 	"extended",
 	"ended",
+	"terminated",
+	"termination",
 	"upgraded",
 	"downgraded",
 }
 
+ACTION_ALIASES = {
+	"terminated": "ended",
+	"termination": "ended",
+}
+
 HEADER_RE = re.compile(
-	r"^\s*(?:Treaty\s+)?(?P<action>Signed|Cancelled|Expired|Extended|Ended|Upgraded|Downgraded)\s*(?:\|\s*)?"
+	r"^\s*(?:Treaty\s+)?(?P<action>Signed|Cancelled|Expired|Extended|Ended|Terminated|Termination|Upgraded|Downgraded)\s*(?:\|\s*)?"
 	r"(?P<treaty>.+?)(?:\s*\|\s*rank\s*#\d+)?\s*$",
 	re.IGNORECASE,
 )
 ACTION_ONLY_HEADER_RE = re.compile(
-	r"^\s*(?:Treaty\s+)?(?P<action>Signed|Cancelled|Expired|Extended|Ended|Upgraded|Downgraded)"
+	r"^\s*(?:Treaty\s+)?(?P<action>Signed|Cancelled|Expired|Extended|Ended|Terminated|Termination|Upgraded|Downgraded)"
 	r"(?:\s*\|\s*rank\s*#\d+)?\s*$",
 	re.IGNORECASE,
 )
@@ -153,6 +160,7 @@ def write_json(path: Path, payload: Any) -> None:
 
 def canonical_action(value: str) -> str:
 	action = value.strip().lower()
+	action = ACTION_ALIASES.get(action, action)
 	if action not in VALID_ACTIONS:
 		raise ValueError(f"Unsupported action: {value}")
 	return action
@@ -220,13 +228,39 @@ def treaty_like_text(text: str) -> bool:
 	return (
 		"from:" in lowered
 		and "to:" in lowered
-		and any(word in lowered for word in ("signed", "cancelled", "expired", "extended", "ended", "upgraded", "downgraded"))
+		and any(
+			word in lowered
+			for word in (
+				"signed",
+				"cancelled",
+				"expired",
+				"extended",
+				"ended",
+				"terminated",
+				"termination",
+				"upgraded",
+				"downgraded",
+			)
+		)
 	)
 
 
 def action_hint_present(text: str) -> bool:
 	lowered = text.lower()
-	return any(word in lowered for word in ("signed", "cancelled", "expired", "extended", "ended", "upgraded", "downgraded"))
+	return any(
+		word in lowered
+		for word in (
+			"signed",
+			"cancelled",
+			"expired",
+			"extended",
+			"ended",
+			"terminated",
+			"termination",
+			"upgraded",
+			"downgraded",
+		)
+	)
 
 
 def has_from_to_labels(text: str) -> bool:
