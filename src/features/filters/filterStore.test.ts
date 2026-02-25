@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   deserializeQueryState,
+  NODE_MAX_RADIUS_DEFAULT,
+  NODE_MAX_RADIUS_MAX,
+  NODE_MAX_RADIUS_MIN,
+  normalizeMaxNodeRadius,
+  normalizeScoreSizeContrast,
+  SCORE_SIZE_CONTRAST_DEFAULT,
+  SCORE_SIZE_CONTRAST_MAX,
+  SCORE_SIZE_CONTRAST_MIN,
   serializeQueryState,
   type QueryState,
   useFilterStore
@@ -22,6 +30,8 @@ function makeQuery(): QueryState {
       evidenceMode: "all",
       topXByScore: null,
       sizeByScore: false,
+      scoreSizeContrast: SCORE_SIZE_CONTRAST_DEFAULT,
+      maxNodeRadius: NODE_MAX_RADIUS_DEFAULT,
       showFlags: false
     },
     textQuery: "",
@@ -45,6 +55,8 @@ function makeDefaultQuery(): QueryState {
       evidenceMode: "all",
       topXByScore: null,
       sizeByScore: false,
+      scoreSizeContrast: SCORE_SIZE_CONTRAST_DEFAULT,
+      maxNodeRadius: NODE_MAX_RADIUS_DEFAULT,
       showFlags: false
     },
     textQuery: "",
@@ -68,6 +80,8 @@ function makeNonDefaultQuery(): QueryState {
       evidenceMode: "both-confirmed",
       topXByScore: 25,
       sizeByScore: true,
+      scoreSizeContrast: 1.8,
+      maxNodeRadius: 30,
       showFlags: true
     },
     textQuery: "non-default",
@@ -100,6 +114,38 @@ describe("filterStore anchor URL state", () => {
 
     const parsed = deserializeQueryState(`?${serialized}`);
     expect(parsed.filters?.showFlags).toBe(true);
+  });
+
+  it("round-trips scoreSizeContrast when non-default", () => {
+    const query = makeQuery();
+    query.filters.scoreSizeContrast = 2.25;
+
+    const serialized = serializeQueryState(query);
+    expect(serialized).toContain("scoreSizeContrast=2.25");
+
+    const parsed = deserializeQueryState(`?${serialized}`);
+    expect(parsed.filters?.scoreSizeContrast).toBe(2.25);
+  });
+
+  it("uses neutral scoreSizeContrast default when absent", () => {
+    const parsed = deserializeQueryState("");
+    expect(parsed.filters?.scoreSizeContrast).toBe(SCORE_SIZE_CONTRAST_DEFAULT);
+  });
+
+  it("round-trips maxNodeRadius when non-default", () => {
+    const query = makeQuery();
+    query.filters.maxNodeRadius = 32;
+
+    const serialized = serializeQueryState(query);
+    expect(serialized).toContain("maxNodeRadius=32");
+
+    const parsed = deserializeQueryState(`?${serialized}`);
+    expect(parsed.filters?.maxNodeRadius).toBe(32);
+  });
+
+  it("uses default maxNodeRadius when absent", () => {
+    const parsed = deserializeQueryState("");
+    expect(parsed.filters?.maxNodeRadius).toBe(NODE_MAX_RADIUS_DEFAULT);
   });
 });
 
@@ -156,5 +202,45 @@ describe("filterStore playback speed parsing", () => {
 
     useFilterStore.getState().setNetworkFullscreen(false);
     expect(useFilterStore.getState().isNetworkFullscreen).toBe(false);
+  });
+});
+
+describe("filterStore score size contrast setter", () => {
+  it("clamps and normalizes scoreSizeContrast values", () => {
+    useFilterStore.setState({ query: makeDefaultQuery() });
+
+    useFilterStore.getState().setScoreSizeContrast(SCORE_SIZE_CONTRAST_MIN - 1);
+    expect(useFilterStore.getState().query.filters.scoreSizeContrast).toBe(SCORE_SIZE_CONTRAST_MIN);
+
+    useFilterStore.getState().setScoreSizeContrast(SCORE_SIZE_CONTRAST_MAX + 1);
+    expect(useFilterStore.getState().query.filters.scoreSizeContrast).toBe(SCORE_SIZE_CONTRAST_MAX);
+
+    useFilterStore.getState().setScoreSizeContrast(1.234);
+    expect(useFilterStore.getState().query.filters.scoreSizeContrast).toBe(1.23);
+  });
+
+  it("falls back to neutral for non-finite values", () => {
+    expect(normalizeScoreSizeContrast(Number.NaN)).toBe(SCORE_SIZE_CONTRAST_DEFAULT);
+    expect(normalizeScoreSizeContrast(Number.POSITIVE_INFINITY)).toBe(SCORE_SIZE_CONTRAST_DEFAULT);
+  });
+});
+
+describe("filterStore max node radius setter", () => {
+  it("clamps and normalizes maxNodeRadius values", () => {
+    useFilterStore.setState({ query: makeDefaultQuery() });
+
+    useFilterStore.getState().setMaxNodeRadius(NODE_MAX_RADIUS_MIN - 1);
+    expect(useFilterStore.getState().query.filters.maxNodeRadius).toBe(NODE_MAX_RADIUS_MIN);
+
+    useFilterStore.getState().setMaxNodeRadius(NODE_MAX_RADIUS_MAX + 1);
+    expect(useFilterStore.getState().query.filters.maxNodeRadius).toBe(NODE_MAX_RADIUS_MAX);
+
+    useFilterStore.getState().setMaxNodeRadius(22.6);
+    expect(useFilterStore.getState().query.filters.maxNodeRadius).toBe(23);
+  });
+
+  it("falls back to default for non-finite values", () => {
+    expect(normalizeMaxNodeRadius(Number.NaN)).toBe(NODE_MAX_RADIUS_DEFAULT);
+    expect(normalizeMaxNodeRadius(Number.POSITIVE_INFINITY)).toBe(NODE_MAX_RADIUS_DEFAULT);
   });
 });

@@ -23,6 +23,8 @@ export function derivePressureLevel(score: number, current: FlagPressureLevel): 
 
 type BuildHoverResetKeyOptions = {
   sizeByScore: boolean;
+  scoreSizeContrast: number;
+  maxNodeRadius: number;
   maxEdges: number;
   allEventsLength: number;
   scopedIndexes: number[];
@@ -46,6 +48,8 @@ export function buildHoverResetKey(baseQuery: QueryState, options: BuildHoverRes
     baseQuery.filters.includeNoise ? "1" : "0",
     baseQuery.filters.evidenceMode,
     options.sizeByScore ? "1" : "0",
+    String(options.scoreSizeContrast),
+    String(options.maxNodeRadius),
     baseQuery.textQuery.trim().toLowerCase(),
     baseQuery.sort.field,
     baseQuery.sort.direction,

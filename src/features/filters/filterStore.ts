@@ -5,6 +5,13 @@ export type SortField = "timestamp" | "action" | "type" | "from" | "to" | "sourc
 export type SortDirection = "asc" | "desc";
 export type PlaybackSpeed = 1 | 2 | 4 | 8 | 16 | 32;
 
+export const SCORE_SIZE_CONTRAST_DEFAULT = 1;
+export const SCORE_SIZE_CONTRAST_MIN = 0.25;
+export const SCORE_SIZE_CONTRAST_MAX = 3;
+export const NODE_MAX_RADIUS_DEFAULT = 14;
+export const NODE_MAX_RADIUS_MIN = 8;
+export const NODE_MAX_RADIUS_MAX = 40;
+
 export type QueryFilters = {
   alliances: number[];
   anchoredAllianceIds: number[];
@@ -16,6 +23,8 @@ export type QueryFilters = {
   evidenceMode: EvidenceMode;
   topXByScore: number | null;
   sizeByScore: boolean;
+  scoreSizeContrast: number;
+  maxNodeRadius: number;
   showFlags: boolean;
 };
 
@@ -71,10 +80,42 @@ type FilterStore = {
   setEvidenceMode: (mode: EvidenceMode) => void;
   setTopXByScore: (value: number | null) => void;
   setSizeByScore: (value: boolean) => void;
+  setScoreSizeContrast: (value: number) => void;
+  setMaxNodeRadius: (value: number) => void;
   setShowFlags: (value: boolean) => void;
   clearFilters: () => void;
   resetAll: () => void;
 };
+
+function normalizeBoundedNumber(value: number | null | undefined, options: {
+  fallback: number;
+  min: number;
+  max: number;
+  decimals: number;
+}): number {
+  const numericValue = Number.isFinite(value) ? Number(value) : options.fallback;
+  const clamped = Math.max(options.min, Math.min(options.max, numericValue));
+  const scale = 10 ** options.decimals;
+  return Math.round(clamped * scale) / scale;
+}
+
+export function normalizeScoreSizeContrast(value: number | null | undefined): number {
+  return normalizeBoundedNumber(value, {
+    fallback: SCORE_SIZE_CONTRAST_DEFAULT,
+    min: SCORE_SIZE_CONTRAST_MIN,
+    max: SCORE_SIZE_CONTRAST_MAX,
+    decimals: 2
+  });
+}
+
+export function normalizeMaxNodeRadius(value: number | null | undefined): number {
+  return normalizeBoundedNumber(value, {
+    fallback: NODE_MAX_RADIUS_DEFAULT,
+    min: NODE_MAX_RADIUS_MIN,
+    max: NODE_MAX_RADIUS_MAX,
+    decimals: 0
+  });
+}
 
 const defaultQueryState: QueryState = {
   time: {
@@ -102,6 +143,8 @@ const defaultQueryState: QueryState = {
     evidenceMode: "all",
     topXByScore: null,
     sizeByScore: false,
+    scoreSizeContrast: SCORE_SIZE_CONTRAST_DEFAULT,
+    maxNodeRadius: NODE_MAX_RADIUS_DEFAULT,
     showFlags: false
   },
   textQuery: "",
@@ -133,6 +176,8 @@ function createDefaultQueryState(): QueryState {
       evidenceMode: defaultQueryState.filters.evidenceMode,
       topXByScore: defaultQueryState.filters.topXByScore,
       sizeByScore: defaultQueryState.filters.sizeByScore,
+      scoreSizeContrast: defaultQueryState.filters.scoreSizeContrast,
+      maxNodeRadius: defaultQueryState.filters.maxNodeRadius,
       showFlags: defaultQueryState.filters.showFlags
     },
     textQuery: defaultQueryState.textQuery,
@@ -182,6 +227,14 @@ function readPositiveNumberParam(raw: string | null): number | null {
   }
   const normalized = Math.floor(parsed);
   return normalized > 0 ? normalized : null;
+}
+
+function readFiniteNumberParam(raw: string | null): number | null {
+  if (!raw) {
+    return null;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function deserializeQueryState(search: string): Partial<QueryState> {
@@ -239,6 +292,8 @@ export function deserializeQueryState(search: string): Partial<QueryState> {
       evidenceMode,
       topXByScore: readPositiveNumberParam(params.get("topXByScore")),
       sizeByScore: params.get("sizeByScore") === "1",
+      scoreSizeContrast: normalizeScoreSizeContrast(readFiniteNumberParam(params.get("scoreSizeContrast"))),
+      maxNodeRadius: normalizeMaxNodeRadius(readFiniteNumberParam(params.get("maxNodeRadius"))),
       showFlags: params.get("showFlags") === "1"
     },
     textQuery: params.get("q") ?? "",
@@ -304,6 +359,12 @@ export function serializeQueryState(query: QueryState): string {
   }
   if (query.filters.sizeByScore) {
     params.set("sizeByScore", "1");
+  }
+  if (Math.abs(query.filters.scoreSizeContrast - SCORE_SIZE_CONTRAST_DEFAULT) > Number.EPSILON) {
+    params.set("scoreSizeContrast", String(normalizeScoreSizeContrast(query.filters.scoreSizeContrast)));
+  }
+  if (query.filters.maxNodeRadius !== NODE_MAX_RADIUS_DEFAULT) {
+    params.set("maxNodeRadius", String(normalizeMaxNodeRadius(query.filters.maxNodeRadius)));
   }
   if (query.filters.showFlags) {
     params.set("showFlags", "1");
@@ -547,6 +608,30 @@ export const useFilterStore = create<FilterStore>((set) => ({
         filters: {
           ...state.query.filters,
           sizeByScore: value
+        }
+      }
+    }));
+  },
+  setScoreSizeContrast: (value) => {
+    const normalized = normalizeScoreSizeContrast(value);
+    set((state) => ({
+      query: {
+        ...state.query,
+        filters: {
+          ...state.query.filters,
+          scoreSizeContrast: normalized
+        }
+      }
+    }));
+  },
+  setMaxNodeRadius: (value) => {
+    const normalized = normalizeMaxNodeRadius(value);
+    set((state) => ({
+      query: {
+        ...state.query,
+        filters: {
+          ...state.query.filters,
+          maxNodeRadius: normalized
         }
       }
     }));

@@ -28,6 +28,8 @@ function makeQuery(): QueryState {
       evidenceMode: "all",
       topXByScore: null,
       sizeByScore: false,
+      scoreSizeContrast: 1,
+      maxNodeRadius: 25,
       showFlags: false
     },
     textQuery: "  Test Query  ",
@@ -64,6 +66,8 @@ describe("networkViewPolicy", () => {
 
       const keyAtT1 = buildHoverResetKey(baseQuery, {
         sizeByScore: true,
+        scoreSizeContrast: 1,
+        maxNodeRadius: 25,
         maxEdges: 500,
         allEventsLength: 100,
         scopedIndexes: [2, 5, 7],
@@ -72,6 +76,8 @@ describe("networkViewPolicy", () => {
 
       const keyAtT2 = buildHoverResetKey(baseQuery, {
         sizeByScore: true,
+        scoreSizeContrast: 1,
+        maxNodeRadius: 25,
         maxEdges: 500,
         allEventsLength: 100,
         scopedIndexes: [2, 5, 7],
@@ -93,6 +99,8 @@ describe("networkViewPolicy", () => {
 
       const originalKey = buildHoverResetKey(original, {
         sizeByScore: false,
+        scoreSizeContrast: 1,
+        maxNodeRadius: 25,
         maxEdges: 700,
         allEventsLength: 80,
         scopedIndexes: [1, 3, 8]
@@ -100,12 +108,62 @@ describe("networkViewPolicy", () => {
 
       const modifiedKey = buildHoverResetKey(modified, {
         sizeByScore: false,
+        scoreSizeContrast: 1,
+        maxNodeRadius: 25,
         maxEdges: 700,
         allEventsLength: 80,
         scopedIndexes: [1, 3, 8]
       });
 
       expect(modifiedKey).not.toBe(originalKey);
+    });
+
+    it("changes key when score size contrast changes", () => {
+      const baseQuery = makeQuery();
+
+      const contrastOne = buildHoverResetKey(baseQuery, {
+        sizeByScore: true,
+        scoreSizeContrast: 1,
+        maxNodeRadius: 25,
+        maxEdges: 400,
+        allEventsLength: 120,
+        scopedIndexes: [0, 4, 9]
+      });
+
+      const contrastHigh = buildHoverResetKey(baseQuery, {
+        sizeByScore: true,
+        scoreSizeContrast: 2,
+        maxNodeRadius: 25,
+        maxEdges: 400,
+        allEventsLength: 120,
+        scopedIndexes: [0, 4, 9]
+      });
+
+      expect(contrastHigh).not.toBe(contrastOne);
+    });
+
+    it("changes key when max node radius changes", () => {
+      const baseQuery = makeQuery();
+
+      const smaller = buildHoverResetKey(baseQuery, {
+        sizeByScore: true,
+        scoreSizeContrast: 1,
+        maxNodeRadius: 20,
+        maxEdges: 400,
+        allEventsLength: 120,
+        scopedIndexes: [0, 4, 9]
+      });
+
+      const larger = buildHoverResetKey(baseQuery, {
+        sizeByScore: true,
+        scoreSizeContrast: 1,
+        maxNodeRadius: 30,
+        maxEdges: 400,
+        allEventsLength: 120,
+        scopedIndexes: [0, 4, 9]
+      });
+
+      expect(larger).not.toBe(smaller);
     });
   });
 

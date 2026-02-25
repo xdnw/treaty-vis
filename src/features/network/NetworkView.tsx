@@ -6,7 +6,7 @@ import type { AllianceFlagSnapshot, AllianceScoresByDay, FlagAssetsPayload, Time
 import { selectTimelapseNetworkEventIndexes } from "@/domain/timelapse/loader";
 import { resolveScoreRowForPlayhead } from "@/domain/timelapse/scoreDay";
 import { deriveNetworkEdges } from "@/domain/timelapse/selectors";
-import { type QueryState, useFilterStore } from "@/features/filters/filterStore";
+import { NODE_MAX_RADIUS_DEFAULT, type QueryState, useFilterStore } from "@/features/filters/filterStore";
 import { dampPosition, positionForNode, type Point } from "@/features/network/layout";
 import {
   FLAG_MAX_SPRITES,
@@ -51,7 +51,7 @@ const BASE_EDGE_OPACITY = 0.62;
 const FOCUSED_ADJACENT_EDGE_OPACITY = 0.84;
 const HIGHLIGHTED_EDGE_OPACITY = 0.95;
 const MIN_NODE_RADIUS = 5;
-const MAX_NODE_RADIUS = 12;
+export const DEFAULT_MAX_NODE_RADIUS = NODE_MAX_RADIUS_DEFAULT;
 const NON_ANCHORED_DAMPING = 0.22;
 const ZOOM_BAND_ZOOMED_IN_MAX_RATIO = 1.25;
 const ZOOM_BAND_MID_MAX_RATIO = 2.35;
@@ -123,6 +123,8 @@ type Props = {
   focusedAllianceId: number | null;
   focusedEdgeKey: string | null;
   sizeByScore: boolean;
+  scoreSizeContrast: number;
+  maxNodeRadius: number;
   showFlags: boolean;
   flagAssetsPayload: FlagAssetsPayload | null;
   allianceScoresByDay: AllianceScoresByDay | null;
@@ -147,8 +149,8 @@ function calcMaxEdges(width: number, height: number): number {
   return Math.max(240, Math.min(2400, adaptive));
 }
 
-function clampRadius(value: number): number {
-  return Math.max(MIN_NODE_RADIUS, Math.min(MAX_NODE_RADIUS, value));
+function clampRadius(value: number, maxNodeRadius: number): number {
+  return Math.max(MIN_NODE_RADIUS, Math.min(maxNodeRadius, value));
 }
 
 function canonicalTreatyTypeKey(value: string): string {
@@ -170,26 +172,42 @@ function colorWithOpacity(hexColor: string, opacity: number): string {
   return `rgba(${red}, ${green}, ${blue}, ${boundedOpacity})`;
 }
 
-function degreeRadius(degree: number): number {
-  return clampRadius(3 + Math.log2(degree + 1) * 1.2);
+function degreeRadius(degree: number, maxNodeRadius: number): number {
+  return clampRadius(3 + Math.log2(degree + 1) * 1.2, maxNodeRadius);
 }
 
-function scoreRadius(score: number, minScore: number, maxScore: number): number {
+export function applyScoreContrast(normalizedScore: number, contrast: number): number {
+  const clampedScore = Math.max(0, Math.min(1, normalizedScore));
+  if (!Number.isFinite(contrast) || contrast <= 0 || Math.abs(contrast - 1) <= Number.EPSILON) {
+    return clampedScore;
+  }
+  return Math.pow(clampedScore, contrast);
+}
+
+export function scoreRadiusWithContrast(
+  score: number,
+  minScore: number,
+  maxScore: number,
+  contrast: number,
+  maxNodeRadius: number = DEFAULT_MAX_NODE_RADIUS
+): number {
   if (score <= 0 || minScore <= 0 || maxScore <= 0) {
     return MIN_NODE_RADIUS;
   }
 
   if (maxScore - minScore <= Number.EPSILON) {
-    return MAX_NODE_RADIUS;
+    return maxNodeRadius;
   }
 
-  const safeScore = Math.max(score, minScore);
-  const range = Math.log(maxScore) - Math.log(minScore);
+  const safeScore = Math.max(minScore, Math.min(maxScore, score));
+  const range = maxScore - minScore;
   if (!Number.isFinite(range) || range <= 0) {
-    return MAX_NODE_RADIUS;
+    return maxNodeRadius;
   }
-  const normalized = (Math.log(safeScore) - Math.log(minScore)) / range;
-  return clampRadius(MIN_NODE_RADIUS + normalized * (MAX_NODE_RADIUS - MIN_NODE_RADIUS));
+
+  const normalized = (safeScore - minScore) / range;
+  const contrasted = applyScoreContrast(normalized, contrast);
+  return clampRadius(MIN_NODE_RADIUS + contrasted * (maxNodeRadius - MIN_NODE_RADIUS), maxNodeRadius);
 }
 
 function resolveAllianceScoreWithFallback(
@@ -426,6 +444,8 @@ export function NetworkView({
   focusedAllianceId,
   focusedEdgeKey,
   sizeByScore,
+  scoreSizeContrast,
+  maxNodeRadius,
   showFlags,
   flagAssetsPayload,
   allianceScoresByDay,
@@ -675,6 +695,8 @@ export function NetworkView({
   const hoverResetKey = useMemo(() => {
     return buildHoverResetKey(baseQuery, {
       sizeByScore,
+      scoreSizeContrast,
+      maxNodeRadius,
       maxEdges,
       allEventsLength: allEvents.length,
       scopedIndexes,
@@ -694,8 +716,10 @@ export function NetworkView({
     baseQuery.textQuery,
     baseQuery.time.end,
     baseQuery.time.start,
+    maxNodeRadius,
     maxEdges,
     playhead,
+    scoreSizeContrast,
     scopedIndexes,
     sizeByScore
   ]);
@@ -827,8 +851,8 @@ export function NetworkView({
       const nodeScore = scoreByNode.get(id) ?? null;
       const baseRadius =
         useScoreSizing && nodeScore !== null
-          ? scoreRadius(nodeScore, normalizedMinScore, maxVisibleScore)
-          : degreeRadius(meta.degree);
+          ? scoreRadiusWithContrast(nodeScore, normalizedMinScore, maxVisibleScore, scoreSizeContrast, maxNodeRadius)
+          : degreeRadius(meta.degree, maxNodeRadius);
       const counterparties = nodeCounterparties.get(id);
       const activeTreaties = counterparties
         ? [...counterparties.entries()]
@@ -938,9 +962,11 @@ export function NetworkView({
     flagAssetsPayload,
     focusedAllianceId,
     focusedEdgeKey,
+    maxNodeRadius,
     maxEdges,
     playhead,
     resolveAllianceFlagAtPlayhead,
+    scoreSizeContrast,
     showFlags,
     sizeByScore
   ]);

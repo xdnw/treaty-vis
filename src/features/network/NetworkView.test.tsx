@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ScoreLoaderSnapshot, ScoreLoaderState } from "@/domain/timelapse/scoreLoader";
-import { deriveScoreFailureDiagnostic } from "@/features/network/NetworkView";
+import {
+  applyScoreContrast,
+  DEFAULT_MAX_NODE_RADIUS,
+  deriveScoreFailureDiagnostic,
+  scoreRadiusWithContrast
+} from "@/features/network/NetworkView";
 
 function makeSnapshot(state: ScoreLoaderState): ScoreLoaderSnapshot {
   return {
@@ -69,5 +74,36 @@ describe("NetworkView score diagnostics", () => {
     expect(withSizing).not.toBeNull();
     expect(withSizing?.code).toBe("manifest-missing");
     expect(withSizing?.actionableRetry).toBe(false);
+  });
+});
+
+describe("NetworkView score radius mapping", () => {
+  it("keeps neutral contrast equivalent to baseline normalized score", () => {
+    const neutral = applyScoreContrast(0.5, 1);
+    expect(neutral).toBeCloseTo(0.5, 6);
+  });
+
+  it("increases spread at higher contrast around the same midpoint distance", () => {
+    const upperLow = applyScoreContrast(0.6, 3);
+    const upperHigh = applyScoreContrast(0.95, 3);
+
+    expect(upperLow).toBeLessThan(0.6);
+    expect(upperHigh).toBeGreaterThan(0.8);
+    expect(upperHigh - upperLow).toBeGreaterThan(0.35);
+  });
+
+  it("maps 100k vs 900k to visibly different radii", () => {
+    const low = scoreRadiusWithContrast(100_000, 10_000, 1_000_000, 2);
+    const high = scoreRadiusWithContrast(900_000, 10_000, 1_000_000, 2);
+
+    expect(high - low).toBeGreaterThan(2);
+  });
+
+  it("keeps radii clamped within node bounds at high contrast", () => {
+    const nearMin = scoreRadiusWithContrast(1, 1, 10_000, 3);
+    const nearMax = scoreRadiusWithContrast(10_000, 1, 10_000, 3);
+
+    expect(nearMin).toBeGreaterThanOrEqual(5);
+    expect(nearMax).toBeLessThanOrEqual(DEFAULT_MAX_NODE_RADIUS);
   });
 });

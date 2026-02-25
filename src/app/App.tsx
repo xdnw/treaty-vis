@@ -632,6 +632,8 @@ export function App() {
                 focusedAllianceId={query.focus.allianceId}
                 focusedEdgeKey={query.focus.edgeKey}
                 sizeByScore={query.filters.sizeByScore}
+                scoreSizeContrast={query.filters.scoreSizeContrast}
+                maxNodeRadius={query.filters.maxNodeRadius}
                 showFlags={showFlags}
                 flagAssetsPayload={bundle.flagAssetsPayload}
                 allianceScoresByDay={allianceScores?.byDay ?? null}
@@ -673,6 +675,8 @@ export function App() {
                   focusedAllianceId={query.focus.allianceId}
                   focusedEdgeKey={query.focus.edgeKey}
                   sizeByScore={query.filters.sizeByScore}
+                  scoreSizeContrast={query.filters.scoreSizeContrast}
+                  maxNodeRadius={query.filters.maxNodeRadius}
                   showFlags={showFlags}
                   flagAssetsPayload={bundle.flagAssetsPayload}
                   allianceScoresByDay={allianceScores?.byDay ?? null}

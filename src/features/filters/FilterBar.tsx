@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { useFilterStore, type SortDirection, type SortField } from "@/features/filters/filterStore";
+import {
+  NODE_MAX_RADIUS_MAX,
+  NODE_MAX_RADIUS_MIN,
+  SCORE_SIZE_CONTRAST_MAX,
+  SCORE_SIZE_CONTRAST_MIN,
+  useFilterStore,
+  type SortDirection,
+  type SortField
+} from "@/features/filters/filterStore";
 import { PlaybackControls } from "@/features/filters/PlaybackControls";
 import type { TimelapseIndices } from "@/domain/timelapse/selectors";
 
@@ -62,6 +70,8 @@ export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankDa
   const setEvidenceMode = useFilterStore((state) => state.setEvidenceMode);
   const setTopXByScore = useFilterStore((state) => state.setTopXByScore);
   const setSizeByScore = useFilterStore((state) => state.setSizeByScore);
+  const setScoreSizeContrast = useFilterStore((state) => state.setScoreSizeContrast);
+  const setMaxNodeRadius = useFilterStore((state) => state.setMaxNodeRadius);
   const setShowFlags = useFilterStore((state) => state.setShowFlags);
   const clearFilters = useFilterStore((state) => state.clearFilters);
   const isNetworkFullscreen = useFilterStore((state) => state.isNetworkFullscreen);
@@ -292,6 +302,36 @@ export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankDa
               type="checkbox"
             />
             Size nodes by score
+          </label>
+          <label className="flex items-center gap-2">
+            Score size contrast
+            <input
+              aria-label="Score size contrast"
+              className="w-24"
+              type="range"
+              min={SCORE_SIZE_CONTRAST_MIN}
+              max={SCORE_SIZE_CONTRAST_MAX}
+              step={0.05}
+              value={query.filters.scoreSizeContrast}
+              disabled={!hasScoreData}
+              title={hasScoreData ? undefined : "Score data unavailable"}
+              onChange={(event) => setScoreSizeContrast(Number(event.target.value))}
+            />
+            <span className="tabular-nums text-xs text-muted">{query.filters.scoreSizeContrast.toFixed(2)}</span>
+          </label>
+          <label className="flex items-center gap-2">
+            Max node radius
+            <input
+              aria-label="Max node radius"
+              className="w-24"
+              type="range"
+              min={NODE_MAX_RADIUS_MIN}
+              max={NODE_MAX_RADIUS_MAX}
+              step={1}
+              value={query.filters.maxNodeRadius}
+              onChange={(event) => setMaxNodeRadius(Number(event.target.value))}
+            />
+            <span className="tabular-nums text-xs text-muted">{query.filters.maxNodeRadius}</span>
           </label>
           <label className="flex items-center gap-2">
             <input
