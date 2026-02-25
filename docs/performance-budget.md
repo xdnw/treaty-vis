@@ -67,4 +67,4 @@ Do not proceed to deeper architecture migrations unless the baseline report is c
 - Score toggle lifecycle: `sizeByScore` must support failure -> retry -> success without requiring app reload.
 - Toggle-to-render latency: p95 <= 200ms from enabling score sizing to first `network.graph.build` with `scoreSizingActive=true`.
 - Graph build stability: `network.graph.build` p95 must remain <= 80ms during score sizing runs.
-- Score loader diagnostics: each attempt must finish in `ready` or `error-*` (no silent indefinite loading).
+- Score loader diagnostics: each attempt must finish in `ready` or an explicit terminal failure (`error-timeout`, `error-http`, `error-network`, `error-decode`, `error-abort`, `error-manifest-missing`, `error-worker-unavailable`, `error-worker-failure`) with no silent indefinite loading.

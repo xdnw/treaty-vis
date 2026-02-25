@@ -9,10 +9,23 @@ export type ScoreLoaderState =
   | "ready"
   | "error-timeout"
   | "error-http"
+  | "error-network"
   | "error-decode"
-  | "error-abort";
+  | "error-abort"
+  | "error-manifest-missing"
+  | "error-worker-unavailable"
+  | "error-worker-failure";
 
-export type ScoreLoaderTerminalState = "ready" | "error-timeout" | "error-http" | "error-decode" | "error-abort";
+export type ScoreLoaderTerminalState =
+  | "ready"
+  | "error-timeout"
+  | "error-http"
+  | "error-network"
+  | "error-decode"
+  | "error-abort"
+  | "error-manifest-missing"
+  | "error-worker-unavailable"
+  | "error-worker-failure";
 
 export type ScoreLoaderSnapshot = {
   requestId: string;
@@ -69,28 +82,226 @@ const SCORE_CACHE_STORE = "scoreRuntime";
 const SCORE_CACHE_VERSION = 1;
 const SCORE_TIMEOUT_MS = 15_000;
 const SCORE_URL = "/data/alliance_scores_v2.msgpack";
-const TERMINAL_STATES = new Set<ScoreLoaderState>(["ready", "error-timeout", "error-http", "error-decode", "error-abort"]);
+const SCORE_FILE_KEY = "alliance_scores_v2.msgpack";
+const TERMINAL_STATES = new Set<ScoreLoaderState>([
+  "ready",
+  "error-timeout",
+  "error-http",
+  "error-network",
+  "error-decode",
+  "error-abort",
+  "error-manifest-missing",
+  "error-worker-unavailable",
+  "error-worker-failure"
+]);
 function isTerminalState(state: ScoreLoaderState): state is ScoreLoaderTerminalState {
   return TERMINAL_STATES.has(state);
 }
 
+type ScoreLoaderFailure = {
+  state: Exclude<ScoreLoaderTerminalState, "ready">;
+  reasonCode: "timeout" | "http" | "network" | "decode" | "abort" | "manifest-missing" | "worker-unavailable" | "worker-failure";
+  message: string;
+  httpStatus?: number | null;
+  decodeMs?: number | null;
+};
+
+class ScoreLoaderHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.name = "ScoreLoaderHttpError";
+    this.status = status;
+  }
+}
+
+class ScoreLoaderDecodeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ScoreLoaderDecodeError";
+  }
+}
+
+class ScoreLoaderManifestMissingError extends Error {
+  constructor() {
+    super("Manifest does not declare alliance_scores_v2.msgpack");
+    this.name = "ScoreLoaderManifestMissingError";
+  }
+}
+
+class ScoreLoaderWorkerUnavailableError extends Error {
+  constructor() {
+    super("Worker unavailable for score decode");
+    this.name = "ScoreLoaderWorkerUnavailableError";
+  }
+}
+
+class ScoreLoaderWorkerFailureError extends Error {
+  constructor(message = "Worker decode failed") {
+    super(message);
+    this.name = "ScoreLoaderWorkerFailureError";
+  }
+}
+
 const allowedTransitions: Record<ScoreLoaderState, ScoreLoaderState[]> = {
-  idle: ["cache-hit", "fetching", "error-timeout", "error-http", "error-decode", "error-abort"],
-  "cache-hit": ["fetching", "ready", "error-timeout", "error-http", "error-decode", "error-abort"],
-  fetching: ["decoding", "error-timeout", "error-http", "error-abort"],
-  decoding: ["ready", "error-decode", "error-abort", "error-timeout"],
+  idle: [
+    "cache-hit",
+    "fetching",
+    "error-timeout",
+    "error-http",
+    "error-network",
+    "error-decode",
+    "error-abort",
+    "error-manifest-missing",
+    "error-worker-unavailable",
+    "error-worker-failure"
+  ],
+  "cache-hit": [
+    "fetching",
+    "ready",
+    "error-timeout",
+    "error-http",
+    "error-network",
+    "error-decode",
+    "error-abort",
+    "error-manifest-missing",
+    "error-worker-unavailable",
+    "error-worker-failure"
+  ],
+  fetching: [
+    "decoding",
+    "error-timeout",
+    "error-http",
+    "error-network",
+    "error-decode",
+    "error-abort",
+    "error-manifest-missing",
+    "error-worker-unavailable",
+    "error-worker-failure"
+  ],
+  decoding: [
+    "ready",
+    "error-timeout",
+    "error-http",
+    "error-network",
+    "error-decode",
+    "error-abort",
+    "error-manifest-missing",
+    "error-worker-unavailable",
+    "error-worker-failure"
+  ],
   ready: [],
   "error-timeout": [],
   "error-http": [],
+  "error-network": [],
   "error-decode": [],
-  "error-abort": []
+  "error-abort": [],
+  "error-manifest-missing": [],
+  "error-worker-unavailable": [],
+  "error-worker-failure": []
 };
 
 const runtimeCache = new Map<string, CachedScoreRuntime>();
 
 function scoreCacheIdentity(manifest: TimelapseManifest): string {
-  const scoreMeta = manifest.files["alliance_scores_v2.msgpack"];
+  const scoreMeta = manifest.files[SCORE_FILE_KEY];
   return scoreMeta ? `${manifest.datasetId}|${scoreMeta.sha256}|${scoreMeta.sizeBytes}` : `${manifest.datasetId}|missing`;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function classifyFailure(
+  error: unknown,
+  stage: "fetch" | "decode",
+  mergedSignal: AbortSignal | undefined,
+  timeoutSignal: AbortSignal,
+  timeoutMs: number,
+  decodeMs: number | null
+): ScoreLoaderFailure {
+  const errorName = error instanceof Error ? error.name : null;
+  const timeoutAbort = timeoutSignal.aborted && timeoutSignal.reason === "timeout";
+  if (timeoutAbort || (mergedSignal?.aborted && timeoutAbort)) {
+    return {
+      state: "error-timeout",
+      reasonCode: "timeout",
+      message: `Timed out after ${timeoutMs}ms`,
+      decodeMs
+    };
+  }
+
+  if (mergedSignal?.aborted || isAbortError(error)) {
+    return {
+      state: "error-abort",
+      reasonCode: "abort",
+      message: stage === "decode" ? "Decode aborted" : "Request aborted",
+      decodeMs
+    };
+  }
+
+  if (error instanceof ScoreLoaderManifestMissingError) {
+    return {
+      state: "error-manifest-missing",
+      reasonCode: "manifest-missing",
+      message: error.message
+    };
+  }
+
+  if (error instanceof ScoreLoaderHttpError) {
+    return {
+      state: "error-http",
+      reasonCode: "http",
+      message: `HTTP ${error.status}`,
+      httpStatus: error.status
+    };
+  }
+
+  if (error instanceof ScoreLoaderWorkerUnavailableError || errorName === "ScoreLoaderWorkerUnavailableError") {
+    const message = error instanceof Error ? error.message : "Worker unavailable for score decode";
+    return {
+      state: "error-worker-unavailable",
+      reasonCode: "worker-unavailable",
+      message,
+      decodeMs
+    };
+  }
+
+  if (error instanceof ScoreLoaderWorkerFailureError || errorName === "ScoreLoaderWorkerFailureError") {
+    const message = error instanceof Error ? error.message : "Worker decode failed";
+    return {
+      state: "error-worker-failure",
+      reasonCode: "worker-failure",
+      message,
+      decodeMs
+    };
+  }
+
+  if (error instanceof ScoreLoaderDecodeError || errorName === "ScoreLoaderDecodeError") {
+    const message = error instanceof Error ? error.message : "Unknown decode failure";
+    return {
+      state: "error-decode",
+      reasonCode: "decode",
+      message,
+      decodeMs
+    };
+  }
+
+  if (stage === "fetch") {
+    return {
+      state: "error-network",
+      reasonCode: "network",
+      message: error instanceof Error ? error.message : "Unknown network failure"
+    };
+  }
+
+  return {
+    state: "error-decode",
+    reasonCode: "decode",
+    message: error instanceof Error ? error.message : "Unknown decode failure",
+    decodeMs
+  };
 }
 
 function summarizeScoredNodes(runtime: AllianceScoresRuntime): number {
@@ -283,7 +494,7 @@ async function writeCachedRuntime(entry: CachedScoreRuntime): Promise<void> {
 
 async function decodeScoreInWorker(payload: ArrayBuffer, requestId: string, signal?: AbortSignal): Promise<AllianceScoresRuntime> {
   if (typeof Worker === "undefined") {
-    throw new Error("Worker unavailable for score decode");
+    throw new ScoreLoaderWorkerUnavailableError();
   }
 
   const worker = new Worker(new URL("./scoreLoader.worker.ts", import.meta.url), { type: "module" });
@@ -310,7 +521,7 @@ async function decodeScoreInWorker(payload: ArrayBuffer, requestId: string, sign
 
     worker.onerror = () => {
       cleanup();
-      reject(new Error("Worker decode failed"));
+      reject(new ScoreLoaderWorkerFailureError());
     };
 
     worker.onmessage = (event: MessageEvent<{ kind: "decode"; requestId: string; ok: boolean; runtime?: AllianceScoresRuntime; error?: string }>) => {
@@ -320,7 +531,7 @@ async function decodeScoreInWorker(payload: ArrayBuffer, requestId: string, sign
       }
       cleanup();
       if (!message.ok || !message.runtime) {
-        reject(new Error(message.error ?? "Worker decode returned empty payload"));
+        reject(new ScoreLoaderDecodeError(message.error ?? "Worker decode returned empty payload"));
         return;
       }
       resolve(message.runtime);
@@ -341,7 +552,7 @@ async function fetchWithProgress(
   const totalBytes = totalBytesHeader ? Number(totalBytesHeader) : null;
 
   if (!response.ok) {
-    throw new Error(`http:${response.status}`);
+    throw new ScoreLoaderHttpError(response.status);
   }
 
   if (!response.body || typeof response.body.getReader !== "function") {
@@ -395,7 +606,27 @@ function createScoreLoader(deps: ScoreLoaderDeps) {
     let snapshot = makeInitialSnapshot(options.requestId, options.manifest.datasetId, deps.now());
     options.onEvent?.(snapshot);
 
-    const cached = await deps.readCache(options.manifest.datasetId);
+    if (!options.manifest.files[SCORE_FILE_KEY]) {
+      snapshot = emitTransition(
+        snapshot,
+        "error-manifest-missing",
+        deps,
+        {
+          reasonCode: "manifest-missing",
+          message: "Manifest does not declare alliance_scores_v2.msgpack"
+        },
+        options.onEvent
+      );
+      return snapshot;
+    }
+
+    let cached: CachedScoreRuntime | null = null;
+    try {
+      cached = await deps.readCache(options.manifest.datasetId);
+    } catch {
+      cached = null;
+    }
+
     const canUseCache = Boolean(cached?.runtime);
 
     if (cached?.runtime) {
@@ -431,118 +662,41 @@ function createScoreLoader(deps: ScoreLoaderDeps) {
 
     const timeout = createTimeoutController(timeoutMs);
     const mergedSignal = mergeSignals([timeout.signal, options.signal]);
+    let stage: "fetch" | "decode" = "fetch";
+    let decodeStartedAt: number | null = null;
 
     try {
       snapshot = emitTransition(snapshot, "fetching", deps, { reasonCode: null, message: null }, options.onEvent);
 
-      let fetchedBody: ArrayBuffer;
-      try {
-        const fetched = await fetchWithProgress(
-          deps.fetchImpl,
-          SCORE_URL,
-          mergedSignal,
-          (bytesFetched, totalBytes) => {
-            snapshot = {
-              ...snapshot,
-              bytesFetched,
-              totalBytes,
-              atMs: deps.now(),
-              elapsedMs: Math.max(0, deps.now() - snapshot.startedAtMs)
-            };
-            options.onEvent?.(snapshot);
-          }
-        );
-        snapshot = {
-          ...snapshot,
-          httpStatus: fetched.status,
-          bytesFetched: fetched.bytesFetched,
-          totalBytes: fetched.totalBytes
-        };
-        fetchedBody = fetched.body;
-      } catch (error) {
-        if (error instanceof Error && error.message.startsWith("http:")) {
-          const status = Number(error.message.split(":")[1]);
-          snapshot = emitTransition(
-            snapshot,
-            "error-http",
-            deps,
-            {
-              httpStatus: Number.isFinite(status) ? status : null,
-              reasonCode: "http-non-ok",
-              message: Number.isFinite(status) ? `HTTP ${status}` : "HTTP error"
-            },
-            options.onEvent
-          );
-          return snapshot;
+      const fetched = await fetchWithProgress(
+        deps.fetchImpl,
+        SCORE_URL,
+        mergedSignal,
+        (bytesFetched, totalBytes) => {
+          const now = deps.now();
+          snapshot = {
+            ...snapshot,
+            bytesFetched,
+            totalBytes,
+            atMs: now,
+            elapsedMs: Math.max(0, now - snapshot.startedAtMs)
+          };
+          options.onEvent?.(snapshot);
         }
+      );
 
-        const aborted = mergedSignal?.aborted || (error instanceof DOMException && error.name === "AbortError");
-        if (aborted) {
-          const timeoutAbort = timeout.signal.aborted && timeout.signal.reason === "timeout";
-          snapshot = emitTransition(
-            snapshot,
-            timeoutAbort ? "error-timeout" : "error-abort",
-            deps,
-            {
-              reasonCode: timeoutAbort ? "fetch-timeout" : "fetch-abort",
-              message: timeoutAbort ? `Timed out after ${timeoutMs}ms` : "Request aborted"
-            },
-            options.onEvent
-          );
-          return snapshot;
-        }
-
-        snapshot = emitTransition(
-          snapshot,
-          "error-http",
-          deps,
-          {
-            reasonCode: "fetch-failed",
-            message: error instanceof Error ? error.message : "Unknown fetch failure"
-          },
-          options.onEvent
-        );
-        return snapshot;
-      }
+      snapshot = {
+        ...snapshot,
+        httpStatus: fetched.status,
+        bytesFetched: fetched.bytesFetched,
+        totalBytes: fetched.totalBytes
+      };
 
       snapshot = emitTransition(snapshot, "decoding", deps, {}, options.onEvent);
+      stage = "decode";
+      decodeStartedAt = deps.now();
 
-      const decodeStartedAt = deps.now();
-      let decoded: AllianceScoresRuntime;
-
-      try {
-        decoded = await deps.decodeInWorker(fetchedBody, options.requestId, mergedSignal);
-      } catch (error) {
-        const aborted = mergedSignal?.aborted || (error instanceof DOMException && error.name === "AbortError");
-        if (aborted) {
-          const timeoutAbort = timeout.signal.aborted && timeout.signal.reason === "timeout";
-          snapshot = emitTransition(
-            snapshot,
-            timeoutAbort ? "error-timeout" : "error-abort",
-            deps,
-            {
-              decodeMs: Math.max(0, deps.now() - decodeStartedAt),
-              reasonCode: timeoutAbort ? "decode-timeout" : "decode-abort",
-              message: timeoutAbort ? `Timed out after ${timeoutMs}ms` : "Decode aborted"
-            },
-            options.onEvent
-          );
-          return snapshot;
-        }
-
-        snapshot = emitTransition(
-          snapshot,
-          "error-decode",
-          deps,
-          {
-            decodeMs: Math.max(0, deps.now() - decodeStartedAt),
-            reasonCode: "decode-failed",
-            message: error instanceof Error ? error.message : "Unknown decode failure"
-          },
-          options.onEvent
-        );
-        return snapshot;
-      }
+      const decoded = await deps.decodeInWorker(fetched.body, options.requestId, mergedSignal);
 
       const decodeMs = Math.max(0, deps.now() - decodeStartedAt);
 
@@ -552,7 +706,11 @@ function createScoreLoader(deps: ScoreLoaderDeps) {
         runtime: decoded,
         cachedAtMs: Date.now()
       };
-      await deps.writeCache(cachedEntry);
+      try {
+        await deps.writeCache(cachedEntry);
+      } catch {
+        // Cache persistence is best-effort; readiness must not fail because persistence failed.
+      }
 
       snapshot = emitTransition(
         snapshot,
@@ -570,6 +728,22 @@ function createScoreLoader(deps: ScoreLoaderDeps) {
         options.onEvent
       );
 
+      return snapshot;
+    } catch (error) {
+      const decodeMs = decodeStartedAt === null ? null : Math.max(0, deps.now() - decodeStartedAt);
+      const failure = classifyFailure(error, stage, mergedSignal, timeout.signal, timeoutMs, decodeMs);
+      snapshot = emitTransition(
+        snapshot,
+        failure.state,
+        deps,
+        {
+          httpStatus: failure.httpStatus ?? snapshot.httpStatus,
+          reasonCode: failure.reasonCode,
+          message: failure.message,
+          decodeMs: failure.decodeMs ?? snapshot.decodeMs
+        },
+        options.onEvent
+      );
       return snapshot;
     } finally {
       timeout.clear();

@@ -60,6 +60,7 @@ export function App() {
   const selectionRequestRef = useRef(0);
   const pulseRequestRef = useRef(0);
   const scoreLoadRequestRef = useRef(0);
+  const scoreAttemptKeyRef = useRef<string | null>(null);
 
   const time = useFilterStore((state) => state.query.time);
   const playback = useFilterStore((state) => state.query.playback);
@@ -72,7 +73,6 @@ export function App() {
   const setTimeRange = useFilterStore((state) => state.setTimeRange);
   const setPlayhead = useFilterStore((state) => state.setPlayhead);
   const setPlaying = useFilterStore((state) => state.setPlaying);
-  const setSizeByScore = useFilterStore((state) => state.setSizeByScore);
   const setFocus = useFilterStore((state) => state.setFocus);
   const clearFocus = useFilterStore((state) => state.clearFocus);
   const resetAll = useFilterStore((state) => state.resetAll);
@@ -261,6 +261,7 @@ export function App() {
     setAllianceScores(null);
     setScoreLoadSnapshot(null);
     setScoreRetryNonce(0);
+    scoreAttemptKeyRef.current = null;
   }, [bundle?.manifest?.datasetId]);
 
   useEffect(() => {
@@ -271,6 +272,12 @@ export function App() {
     if (!scoreFileDeclared) {
       return;
     }
+
+    const attemptKey = `${bundle.manifest.datasetId}:${scoreRetryNonce}`;
+    if (scoreAttemptKeyRef.current === attemptKey) {
+      return;
+    }
+    scoreAttemptKeyRef.current = attemptKey;
 
     let mounted = true;
     scoreLoadRequestRef.current += 1;
@@ -305,10 +312,8 @@ export function App() {
       console.warn(
         "[timelapse] Ignoring 'sizeByScore=1' because manifest does not declare 'alliance_scores_v2.msgpack'."
       );
-      setSizeByScore(false);
-      return;
     }
-  }, [bundle, query.filters.sizeByScore, scoreFileDeclared, setSizeByScore]);
+  }, [bundle, query.filters.sizeByScore, scoreFileDeclared]);
 
   useEffect(() => {
     if (!bundle) {

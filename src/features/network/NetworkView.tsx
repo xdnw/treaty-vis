@@ -305,6 +305,119 @@ type HoverPayload = {
   allianceId: string;
 };
 
+export type ScoreFailureDiagnostic = {
+  code: string;
+  title: string;
+  message: string;
+  actionableRetry: boolean;
+  details: string | null;
+};
+
+export function deriveScoreFailureDiagnostic(params: {
+  sizeByScore: boolean;
+  scoreManifestDeclared: boolean;
+  scoreLoadSnapshot: ScoreLoaderSnapshot | null;
+}): ScoreFailureDiagnostic | null {
+  const { sizeByScore, scoreManifestDeclared, scoreLoadSnapshot } = params;
+
+  if (sizeByScore && !scoreManifestDeclared) {
+    return {
+      code: "manifest-missing",
+      title: "Score sizing unavailable",
+      message: "Manifest does not declare alliance_scores_v2.msgpack.",
+      actionableRetry: false,
+      details: null
+    };
+  }
+
+  if (!scoreLoadSnapshot || !scoreLoadSnapshot.state.startsWith("error-")) {
+    return null;
+  }
+
+  const details = [
+    scoreLoadSnapshot.httpStatus === null ? null : `HTTP ${scoreLoadSnapshot.httpStatus}`,
+    scoreLoadSnapshot.decodeMs === null ? null : `decode ${Math.round(scoreLoadSnapshot.decodeMs)}ms`,
+    `elapsed ${Math.round(scoreLoadSnapshot.elapsedMs)}ms`
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  switch (scoreLoadSnapshot.state) {
+    case "error-timeout":
+      return {
+        code: "timeout",
+        title: "Score load timed out",
+        message: scoreLoadSnapshot.message ?? "Score request timed out.",
+        actionableRetry: true,
+        details
+      };
+    case "error-http":
+      return {
+        code: "http",
+        title: "Score artifact HTTP failure",
+        message: scoreLoadSnapshot.message ?? "Score artifact request returned a non-OK HTTP status.",
+        actionableRetry: true,
+        details
+      };
+    case "error-network":
+      return {
+        code: "network",
+        title: "Score artifact network failure",
+        message: scoreLoadSnapshot.message ?? "Network request for score artifact failed.",
+        actionableRetry: true,
+        details
+      };
+    case "error-worker-unavailable":
+      return {
+        code: "worker-unavailable",
+        title: "Score decode worker unavailable",
+        message: scoreLoadSnapshot.message ?? "Web Worker is unavailable in this environment.",
+        actionableRetry: true,
+        details
+      };
+    case "error-worker-failure":
+      return {
+        code: "worker-failure",
+        title: "Score decode worker failed",
+        message: scoreLoadSnapshot.message ?? "Worker failed while decoding score payload.",
+        actionableRetry: true,
+        details
+      };
+    case "error-decode":
+      return {
+        code: "decode",
+        title: "Score payload decode failure",
+        message: scoreLoadSnapshot.message ?? "Score payload could not be decoded.",
+        actionableRetry: true,
+        details
+      };
+    case "error-abort":
+      return {
+        code: "abort",
+        title: "Score load aborted",
+        message: scoreLoadSnapshot.message ?? "Score request was aborted.",
+        actionableRetry: false,
+        details
+      };
+    case "error-manifest-missing":
+      return {
+        code: "manifest-missing",
+        title: "Score sizing unavailable",
+        message: scoreLoadSnapshot.message ?? "Manifest does not declare alliance_scores_v2.msgpack.",
+        actionableRetry: false,
+        details
+      };
+    default:
+      return {
+        code: "unknown",
+        title: "Score load failed",
+        message: scoreLoadSnapshot.message ?? scoreLoadSnapshot.reasonCode ?? "Score loader failed.",
+        actionableRetry: true,
+        details
+      };
+  }
+}
+
 export function NetworkView({
   allEvents,
   scopedIndexes,
@@ -1264,41 +1377,15 @@ export function NetworkView({
     onFullscreenHintChange(hoveredHintData);
   }, [hoveredHintData, isFullscreen, onFullscreenHintChange]);
 
-  const scoreStatusRows = useMemo(() => {
-    const dayCount = allianceScoreDays.length;
-    const dataDayCount = allianceScoresByDay ? Object.keys(allianceScoresByDay).length : 0;
-    const stage = scoreLoadSnapshot?.state ?? "idle";
-    const elapsedMs = scoreLoadSnapshot ? Math.round(scoreLoadSnapshot.elapsedMs) : 0;
-    const httpStatus = scoreLoadSnapshot?.httpStatus ?? null;
-    const bytesFetched = scoreLoadSnapshot?.bytesFetched ?? 0;
-    const decodeMs = scoreLoadSnapshot?.decodeMs ?? null;
-    const scoredNodes = scoreLoadSnapshot?.scoredNodeCount ?? graph.scoreSizedNodeCount ?? 0;
-
-    return [
-      { label: "Stage", value: stage },
-      { label: "Elapsed", value: `${elapsedMs}ms` },
-      { label: "HTTP", value: httpStatus === null ? "n/a" : String(httpStatus) },
-      { label: "Bytes", value: bytesFetched > 0 ? bytesFetched.toLocaleString() : "0" },
-      { label: "Decode", value: decodeMs === null ? "n/a" : `${Math.round(decodeMs)}ms` },
-      { label: "Day count", value: String(Math.max(dayCount, dataDayCount)) },
-      { label: "Scored nodes", value: String(scoredNodes) }
-    ];
-  }, [
-    allianceScoreDays.length,
-    allianceScoresByDay,
-    graph.scoreSizedNodeCount,
-    scoreLoadSnapshot
-  ]);
-
-  const scoreErrorText = useMemo(() => {
-    if (!scoreLoadSnapshot) {
-      return null;
-    }
-    if (!scoreLoadSnapshot.state.startsWith("error-")) {
-      return null;
-    }
-    return scoreLoadSnapshot.message ?? scoreLoadSnapshot.reasonCode ?? "Score loader failed";
-  }, [scoreLoadSnapshot]);
+  const scoreStatusRows = useMemo(
+    () =>
+      deriveScoreFailureDiagnostic({
+        sizeByScore,
+        scoreManifestDeclared,
+        scoreLoadSnapshot
+      }),
+    [scoreLoadSnapshot, scoreManifestDeclared, sizeByScore]
+  );
 
   return (
     <section className={isFullscreen ? "panel relative h-full w-full rounded-xl p-2 md:p-3" : "panel p-4"}>
@@ -1374,29 +1461,21 @@ export function NetworkView({
           ? ` | scored ${graph.scoreSizedNodeCount}/${graph.nodes.length} (${graph.scoreDay ?? "n/a"})`
           : ""}
       </div> : null}
-      {!isFullscreen ? <div className="mb-2 rounded border border-slate-300 bg-slate-50 px-2 py-2 text-[11px] text-slate-800">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          {scoreStatusRows.map((row) => (
-            <span key={row.label}>
-              <span className="text-slate-500">{row.label}:</span> {row.value}
-            </span>
-          ))}
-        </div>
-        {!scoreManifestDeclared ? (
-          <div className="mt-1 text-amber-800">Manifest does not declare score dataset.</div>
+      {!isFullscreen && scoreStatusRows ? <div className="mb-2 rounded border border-rose-200 bg-rose-50 px-2 py-2 text-[11px] text-rose-900">
+        <div className="font-medium">{scoreStatusRows.title}</div>
+        <div className="mt-0.5">{scoreStatusRows.message}</div>
+        {scoreStatusRows.details ? <div className="mt-0.5 text-rose-700">{scoreStatusRows.details}</div> : null}
+        {scoreStatusRows.actionableRetry ? (
+          <div className="mt-2">
+            <button
+              type="button"
+              className="rounded border border-rose-300 bg-white px-2 py-0.5 text-[11px] hover:bg-rose-100"
+              onClick={onRetryScoreLoad}
+            >
+              Retry score load
+            </button>
+          </div>
         ) : null}
-        {scoreErrorText ? <div className="mt-1 text-rose-700">{scoreErrorText}</div> : null}
-        <div className="mt-2">
-          <button
-            type="button"
-            className="rounded border border-slate-300 px-2 py-0.5 text-[11px] hover:bg-slate-100"
-            onClick={onRetryScoreLoad}
-            disabled={!scoreManifestDeclared}
-            title={scoreManifestDeclared ? "Retry score load" : "Score artifact not declared in manifest"}
-          >
-            Retry score load
-          </button>
-        </div>
       </div> : null}
       <div
         ref={hostRef}

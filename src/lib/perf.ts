@@ -15,7 +15,16 @@ type PerfCollector = {
 export type ScoreLoadAttemptTelemetry = {
   requestId: string;
   datasetId: string;
-  state: "ready" | "error-timeout" | "error-http" | "error-decode" | "error-abort";
+  state:
+    | "ready"
+    | "error-timeout"
+    | "error-http"
+    | "error-network"
+    | "error-decode"
+    | "error-abort"
+    | "error-manifest-missing"
+    | "error-worker-unavailable"
+    | "error-worker-failure";
   elapsedMs: number;
   httpStatus: number | null;
   bytesFetched: number;
