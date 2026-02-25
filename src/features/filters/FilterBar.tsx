@@ -321,6 +321,7 @@ export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankDa
               className="rounded border border-slate-300 px-1 py-0.5"
               value={query.filters.topXByScore ?? 0}
               disabled={!hasScoreRankData}
+              title={hasScoreRankData ? undefined : "Ranking data unavailable"}
               onChange={(event) => {
                 const next = Number(event.target.value);
                 setTopXByScore(Number.isFinite(next) && next > 0 ? next : null);
@@ -338,6 +339,7 @@ export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankDa
             <input
               checked={query.filters.sizeByScore && hasScoreData}
               disabled={!hasScoreData}
+              title={hasScoreData ? undefined : "Score data unavailable"}
               onChange={(event) => setSizeByScore(event.target.checked)}
               type="checkbox"
             />
@@ -351,14 +353,8 @@ export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankDa
             />
             Show alliance flags
           </label>
-          <p className="text-xs text-muted">Loads local atlas-backed flag assets only when enabled.</p>
-          {!hasScoreRankData ? (
-            <p className="text-xs text-muted">Rank dataset not present. Top-X filtering is disabled.</p>
-          ) : null}
-          {!hasScoreData ? (
-            <p className="text-xs text-muted">Score dataset not present. Node size uses degree.</p>
-          ) : null}
-          <p className="text-xs text-muted">Use evidence filter to control how strict treaty confirmation should be.</p>
+          {!hasScoreRankData ? <p className="text-xs text-muted">Top-X ranking unavailable</p> : null}
+          {!hasScoreData ? <p className="text-xs text-muted">Score sizing unavailable</p> : null}
         </div>
 
         <div>

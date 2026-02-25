@@ -213,7 +213,14 @@ export function resolveAllianceFlagSnapshot(
   }
 
   if (best < 0) {
-    return null;
+    const earliestFuture = timeline[0];
+    return {
+      flagKey: earliestFuture.flagKey,
+      action: earliestFuture.action,
+      timestamp: earliestFuture.timestamp,
+      day: earliestFuture.day,
+      allianceName: earliestFuture.allianceName
+    };
   }
 
   const match = timeline[best];

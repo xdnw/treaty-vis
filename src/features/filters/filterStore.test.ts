@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { deserializeQueryState, serializeQueryState, type QueryState } from "@/features/filters/filterStore";
+import {
+  deserializeQueryState,
+  serializeQueryState,
+  type QueryState,
+  useFilterStore
+} from "@/features/filters/filterStore";
 
 function makeQuery(): QueryState {
   return {
@@ -21,6 +26,52 @@ function makeQuery(): QueryState {
     },
     textQuery: "",
     sort: { field: "timestamp", direction: "desc" }
+  };
+}
+
+function makeDefaultQuery(): QueryState {
+  return {
+    time: { start: null, end: null },
+    playback: { playhead: null, isPlaying: false, speed: 1 },
+    focus: { allianceId: null, edgeKey: null, eventId: null },
+    filters: {
+      alliances: [],
+      anchoredAllianceIds: [],
+      treatyTypes: [],
+      actions: [],
+      sources: [],
+      includeInferred: true,
+      includeNoise: true,
+      evidenceMode: "all",
+      topXByScore: null,
+      sizeByScore: false,
+      showFlags: false
+    },
+    textQuery: "",
+    sort: { field: "timestamp", direction: "desc" }
+  };
+}
+
+function makeNonDefaultQuery(): QueryState {
+  return {
+    time: { start: "2020-01-01T00:00:00.000Z", end: "2020-12-31T00:00:00.000Z" },
+    playback: { playhead: "2020-03-01T00:00:00.000Z", isPlaying: true, speed: 4 },
+    focus: { allianceId: 42, edgeKey: "42-7", eventId: "evt-1" },
+    filters: {
+      alliances: [1, 2],
+      anchoredAllianceIds: [2, 1],
+      treatyTypes: ["mdp"],
+      actions: ["signed"],
+      sources: ["bot"],
+      includeInferred: false,
+      includeNoise: false,
+      evidenceMode: "both-confirmed",
+      topXByScore: 25,
+      sizeByScore: true,
+      showFlags: true
+    },
+    textQuery: "non-default",
+    sort: { field: "type", direction: "asc" }
   };
 }
 
@@ -49,5 +100,24 @@ describe("filterStore anchor URL state", () => {
 
     const parsed = deserializeQueryState(`?${serialized}`);
     expect(parsed.filters?.showFlags).toBe(true);
+  });
+});
+
+describe("filterStore reset semantics", () => {
+  it("clearFilters resets filters, text query, time, playback, focus, and sort", () => {
+    useFilterStore.setState({ query: makeNonDefaultQuery() });
+
+    useFilterStore.getState().clearFilters();
+
+    expect(useFilterStore.getState().query).toEqual(makeDefaultQuery());
+    expect(serializeQueryState(useFilterStore.getState().query)).toBe("");
+  });
+
+  it("resetAll matches full default query state", () => {
+    useFilterStore.setState({ query: makeNonDefaultQuery() });
+
+    useFilterStore.getState().resetAll();
+
+    expect(useFilterStore.getState().query).toEqual(makeDefaultQuery());
   });
 });

@@ -20,16 +20,29 @@ import {
 import { buildHoverResetKey, derivePressureLevel } from "@/features/network/networkViewPolicy";
 import { markTimelapsePerf } from "@/lib/perf";
 
-const TREATY_EDGE_COLORS: Record<string, string> = {
-  MDP: "#0b7285",
-  ODP: "#5f3dc4",
-  NAP: "#2b8a3e",
-  PIAT: "#364fc7",
-  PROTECTORATE: "#d9480f"
+type TreatyTypeStyle = {
+  label: string;
+  color: string;
+};
+
+const TREATY_TYPE_STYLES: Record<string, TreatyTypeStyle> = {
+  EXTENSION: { label: "Extension", color: "#7c3aed" },
+  MDOAP: { label: "MDOAP", color: "#0f766e" },
+  MDP: { label: "MDP", color: "#0b7285" },
+  NAP: { label: "NAP", color: "#2b8a3e" },
+  NPT: { label: "NPT", color: "#1d4ed8" },
+  ODOAP: { label: "ODOAP", color: "#9a3412" },
+  ODP: { label: "ODP", color: "#5f3dc4" },
+  OFFSHORE: { label: "Offshore", color: "#475569" },
+  PIAT: { label: "PIAT", color: "#364fc7" },
+  PROTECTORATE: { label: "Protectorate", color: "#d9480f" }
 };
 
 const LABEL_TEXT_COLOR = "#1f2937";
-const EDGE_FALLBACK_COLOR = "#7f8ca3";
+const EDGE_FALLBACK_COLOR = "#4b5563";
+const BASE_EDGE_OPACITY = 0.62;
+const FOCUSED_ADJACENT_EDGE_OPACITY = 0.84;
+const HIGHLIGHTED_EDGE_OPACITY = 0.95;
 const MIN_NODE_RADIUS = 5;
 const MAX_NODE_RADIUS = 12;
 const NON_ANCHORED_DAMPING = 0.22;
@@ -83,10 +96,10 @@ type EdgeLegendItem = {
 };
 
 const EDGE_LEGEND_ITEMS: EdgeLegendItem[] = [
-  ...Object.entries(TREATY_EDGE_COLORS).map(([key, color]) => ({
+  ...Object.entries(TREATY_TYPE_STYLES).map(([key, style]) => ({
     key,
-    color,
-    label: key === "PROTECTORATE" ? "Protectorate" : key
+    color: style.color,
+    label: style.label
   })),
   {
     key: "unknown",
@@ -237,12 +250,6 @@ type HoverPayload = {
   allianceId: string;
 };
 
-type GraphPerfState = {
-  graphBuildMs: number;
-  refreshMs: number;
-  flagDrawMs: number;
-};
-
 type FlagSpriteProps = {
   allianceLabel: string;
   flagKey: string;
@@ -252,7 +259,7 @@ type FlagSpriteProps = {
 function FlagSprite({ allianceLabel, flagKey, flagAssetsPayload }: FlagSpriteProps) {
   const asset = flagAssetsPayload.assets[flagKey];
   if (!asset) {
-    return <div className="text-slate-500">Atlas key not found: {flagKey}</div>;
+    return <div className="text-slate-500">Flag unavailable</div>;
   }
 
   const atlas = flagAssetsPayload.atlas;
@@ -263,7 +270,7 @@ function FlagSprite({ allianceLabel, flagKey, flagAssetsPayload }: FlagSpritePro
       className="inline-block overflow-hidden rounded border border-slate-300"
       style={{ width: asset.w, height: asset.h }}
       aria-label={`${allianceLabel} flag`}
-      title={flagKey}
+      title={`${allianceLabel} flag`}
     >
       <picture>
         <source srcSet={atlas.webp} type="image/webp" />
@@ -316,11 +323,11 @@ export function NetworkView({
   const showFlagsRef = useRef(showFlags);
   const flagAssetsRef = useRef<FlagAssetsPayload | null>(flagAssetsPayload);
   const visibleNodeIdsRef = useRef<Set<string>>(new Set());
+  const warnedUnmappedTreatySignatureRef = useRef("");
   const [size, setSize] = useState({ width: 1000, height: 350 });
   const [hovered, setHovered] = useState<HoverPayload | null>(null);
   const [budgetPreset, setBudgetPreset] = useState<"auto" | "500" | "1000" | "2000" | "unlimited">("auto");
   const [cameraRatio, setCameraRatio] = useState(1);
-  const [perf, setPerf] = useState<GraphPerfState>({ graphBuildMs: 0, refreshMs: 0, flagDrawMs: 0 });
   const [atlasReady, setAtlasReady] = useState(false);
   const [framePressureLevel, setFramePressureLevel] = useState<FlagPressureLevel>("none");
   const [workerEdgeEventIndexes, setWorkerEdgeEventIndexes] = useState<number[] | null>(null);
@@ -693,9 +700,15 @@ export function NetworkView({
 
     previousPositionsRef.current = nextPositions;
 
+    const unmappedTreatyTypes = new Set<string>();
+
     const links: EdgePayload[] = edges.map((edge) => {
       const treatyType = canonicalTreatyTypeKey(edge.treatyType);
-      const color = TREATY_EDGE_COLORS[treatyType] ?? EDGE_FALLBACK_COLOR;
+      const style = TREATY_TYPE_STYLES[treatyType];
+      const color = style?.color ?? EDGE_FALLBACK_COLOR;
+      if (!style && treatyType) {
+        unmappedTreatyTypes.add(treatyType);
+      }
       const highlighted = focusedEdgeKey !== null && focusedEdgeKey === edge.key;
       const linkedToFocusedAlliance =
         focusedAlliance !== null && (edge.sourceId === focusedAlliance || edge.targetId === focusedAlliance);
@@ -727,6 +740,7 @@ export function NetworkView({
       flagRenderMode,
       flagResolvedNodeCount: flagResolutionNodeIds.size,
       spriteNodeIds: nodes.filter((node) => node.flagSprite !== null).map((node) => node.id),
+      unmappedTreatyTypes: [...unmappedTreatyTypes].sort((left, right) => left.localeCompare(right)),
       scoreSizingActive: useScoreSizing,
       scoreDay,
       graphBuildMs
@@ -754,6 +768,23 @@ export function NetworkView({
   ]);
 
   useEffect(() => {
+    if (!import.meta.env.DEV || graph.unmappedTreatyTypes.length === 0) {
+      return;
+    }
+
+    const signature = graph.unmappedTreatyTypes.join("|");
+    if (warnedUnmappedTreatySignatureRef.current === signature) {
+      return;
+    }
+    warnedUnmappedTreatySignatureRef.current = signature;
+
+    console.warn("[NetworkView] Unmapped treaty types in edge color map", {
+      count: graph.unmappedTreatyTypes.length,
+      types: graph.unmappedTreatyTypes
+    });
+  }, [graph.unmappedTreatyTypes]);
+
+  useEffect(() => {
     markTimelapsePerf("network.graph.build", graph.graphBuildMs);
     pushNetworkFlagDiagnostic({
       stage: "graph-build",
@@ -767,7 +798,6 @@ export function NetworkView({
       spriteCandidateCount: graph.flagResolvedNodeCount,
       graphBuildMs: Number(graph.graphBuildMs.toFixed(2))
     });
-    setPerf((current) => ({ ...current, graphBuildMs: Number(graph.graphBuildMs.toFixed(2)) }));
   }, [cameraRatio, framePressureLevel, graph.flagRenderMode, graph.flagResolvedNodeCount, graph.graphBuildMs, graph.nodes.length]);
 
   useEffect(() => {
@@ -1022,7 +1052,11 @@ export function NetworkView({
       if (!graphModel.hasNode(edge.source) || !graphModel.hasNode(edge.target)) {
         continue;
       }
-      const edgeOpacity = edge.highlighted ? 0.95 : edge.adjacentToFocusedAlliance ? 0.82 : 0.5;
+      const edgeOpacity = edge.highlighted
+        ? HIGHLIGHTED_EDGE_OPACITY
+        : edge.adjacentToFocusedAlliance
+          ? FOCUSED_ADJACENT_EDGE_OPACITY
+          : BASE_EDGE_OPACITY;
       graphModel.addDirectedEdgeWithKey(edge.id, edge.source, edge.target, {
         size: edge.highlighted ? 3.2 : edge.adjacentToFocusedAlliance ? 2 : 1.2,
         color: colorWithOpacity(edge.color, edgeOpacity),
@@ -1063,12 +1097,6 @@ export function NetworkView({
       refreshMs: Number(refreshMs.toFixed(2)),
       graphBuildMs: Number(graph.graphBuildMs.toFixed(2))
     });
-
-    setPerf((current) => ({
-      ...current,
-      refreshMs: Number(refreshMs.toFixed(2)),
-      flagDrawMs: Number(flagDrawMsRef.current.toFixed(2))
-    }));
   }, [cameraRatio, graph.flagRenderMode, graph.flagResolvedNodeCount, graph.graphBuildMs, graph.links, graph.nodes]);
 
   useEffect(() => {
@@ -1099,7 +1127,7 @@ export function NetworkView({
           {graph.renderedEdges} edges / {graph.budgetLabel} LOD budget
         </span>
       </header>
-      <div className="mb-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+      <div className="mb-3 space-y-2">
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
           <label htmlFor="lod-budget">LOD budget</label>
           <select
@@ -1140,18 +1168,8 @@ export function NetworkView({
           </div>
         </div>
       </div>
-      <div className="mb-2 flex items-center justify-between text-xs text-muted">
-        <span>State at {playhead ?? "latest"}</span>
-        <span>Rendering {graph.renderedEdges} edges with full detail</span>
-      </div>
       <div className="mb-2 text-xs text-muted">
-        Node sizing: {graph.scoreSizingActive ? `score (${graph.scoreDay ?? "n/a"})` : "degree"}
-      </div>
-      <div className="mb-2 text-[11px] text-muted">
-        Labels: {zoomBand} | Flags: {graph.flagRenderMode} | camera ratio: {cameraRatio.toFixed(2)} | resolved sprites: {graph.flagResolvedNodeCount}
-      </div>
-      <div className="mb-2 text-[11px] text-muted">
-        Perf: build {perf.graphBuildMs.toFixed(2)} ms | refresh {perf.refreshMs.toFixed(2)} ms | sprite draw {perf.flagDrawMs.toFixed(2)} ms | pressure {framePressureLevel}
+        {graph.nodes.length} alliances shown | {graph.renderedEdges} treaties shown | Node size by {graph.scoreSizingActive ? "score" : "connections"}
       </div>
       <div ref={hostRef} className="h-[350px] overflow-hidden rounded-xl border border-slate-200" />
       {hoveredAlliance ? (
@@ -1167,16 +1185,14 @@ export function NetworkView({
           </div>
 
           <div className="mt-2 text-[11px] uppercase tracking-wide text-slate-500">Flag</div>
-          {graph.flagRenderMode === "off" ? (
-            <div className="text-slate-500">flags disabled</div>
-          ) : hoveredFlagKey && flagAssetsPayload ? (
+          {hoveredFlagKey && flagAssetsPayload ? (
             <FlagSprite
               allianceLabel={hoveredAlliance.fullLabel}
               flagKey={hoveredFlagKey}
               flagAssetsPayload={flagAssetsPayload}
             />
           ) : (
-            <div className="text-slate-500">No atlas key available at current playhead.</div>
+            <div className="text-slate-500">Flag unavailable</div>
           )}
 
           <div className="mt-2 text-[11px] uppercase tracking-wide text-slate-500">Active Treaties / Counterparties</div>

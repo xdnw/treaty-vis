@@ -109,6 +109,37 @@ const defaultQueryState: QueryState = {
   }
 };
 
+function createDefaultQueryState(): QueryState {
+  return {
+    time: {
+      ...defaultQueryState.time
+    },
+    playback: {
+      ...defaultQueryState.playback
+    },
+    focus: {
+      ...defaultQueryState.focus
+    },
+    filters: {
+      alliances: [...defaultQueryState.filters.alliances],
+      anchoredAllianceIds: [...defaultQueryState.filters.anchoredAllianceIds],
+      treatyTypes: [...defaultQueryState.filters.treatyTypes],
+      actions: [...defaultQueryState.filters.actions],
+      sources: [...defaultQueryState.filters.sources],
+      includeInferred: defaultQueryState.filters.includeInferred,
+      includeNoise: defaultQueryState.filters.includeNoise,
+      evidenceMode: defaultQueryState.filters.evidenceMode,
+      topXByScore: defaultQueryState.filters.topXByScore,
+      sizeByScore: defaultQueryState.filters.sizeByScore,
+      showFlags: defaultQueryState.filters.showFlags
+    },
+    textQuery: defaultQueryState.textQuery,
+    sort: {
+      ...defaultQueryState.sort
+    }
+  };
+}
+
 function toggleArrayString(values: string[], value: string): string[] {
   if (values.includes(value)) {
     return values.filter((item) => item !== value);
@@ -287,7 +318,7 @@ export function serializeQueryState(query: QueryState): string {
 }
 
 export const useFilterStore = create<FilterStore>((set) => ({
-  query: defaultQueryState,
+  query: createDefaultQueryState(),
   setStateFromUrl: (state) => {
     set((current) => ({
       query: {
@@ -525,17 +556,9 @@ export const useFilterStore = create<FilterStore>((set) => ({
     }));
   },
   clearFilters: () => {
-    set((state) => ({
-      query: {
-        ...state.query,
-        textQuery: "",
-        filters: {
-          ...defaultQueryState.filters
-        }
-      }
-    }));
+    set({ query: createDefaultQueryState() });
   },
   resetAll: () => {
-    set({ query: defaultQueryState });
+    set({ query: createDefaultQueryState() });
   }
 }));

@@ -524,7 +524,17 @@ export function App() {
           >
             Reset All State
           </button>
-          <div className="text-xs text-muted">Focused alliance: {query.focus.allianceId ?? "none"}</div>
+          <div className="text-xs text-muted">
+            Focus: Alliance {query.focus.allianceId ?? "none"} | Edge {query.focus.edgeKey ?? "none"}
+          </div>
+          <button
+            type="button"
+            className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={clearFocus}
+            disabled={query.focus.allianceId === null && query.focus.edgeKey === null}
+          >
+            Clear Focus
+          </button>
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-4">
@@ -550,7 +560,7 @@ export function App() {
         hasScoreRankData={hasScoreRankData}
       />
 
-      <section className="grid gap-4 xl:grid-cols-2">
+      <section className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
         <Suspense fallback={<section className="panel p-4 text-sm text-muted">Loading timeline view...</section>}>
           <TimelineView
             pulse={pulse}
@@ -585,23 +595,6 @@ export function App() {
         onSelectPlayhead={handleSetPlayhead}
         onFocusAlliance={(allianceId) => setFocus({ allianceId, edgeKey: null })}
       />
-
-      {(query.focus.allianceId !== null || query.focus.edgeKey !== null) && (
-        <section className="panel p-3 text-sm text-slate-700">
-          <div className="flex items-center justify-between">
-            <div>
-              Focused Context | Alliance: {query.focus.allianceId ?? "none"} | Edge: {query.focus.edgeKey ?? "none"}
-            </div>
-            <button
-              type="button"
-              className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
-              onClick={clearFocus}
-            >
-              Clear Focus
-            </button>
-          </div>
-        </section>
-      )}
     </main>
   );
 }
