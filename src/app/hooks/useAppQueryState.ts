@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { type FocusSlice, type QueryState, useFilterStore } from "@/features/filters/filterStore";
+import { useFilterStoreShallow } from "@/features/filters/useFilterStoreShallow";
 
 type AppActions = {
   setTimeRange: (start: string | null, end: string | null) => void;
@@ -14,36 +15,21 @@ type AppActions = {
 };
 
 export function useAppQueryState(): { query: QueryState; actions: AppActions } {
-  const time = useFilterStore((state) => state.query.time);
-  const playback = useFilterStore((state) => state.query.playback);
-  const focus = useFilterStore((state) => state.query.focus);
-  const filters = useFilterStore((state) => state.query.filters);
-  const textQuery = useFilterStore((state) => state.query.textQuery);
-  const sort = useFilterStore((state) => state.query.sort);
+  const query = useFilterStore((state) => state.query);
 
-  const actions = {
-    setStateFromUrl: useFilterStore((state) => state.setStateFromUrl),
-    setTimeRange: useFilterStore((state) => state.setTimeRange),
-    setPlayhead: useFilterStore((state) => state.setPlayhead),
-    setPlaying: useFilterStore((state) => state.setPlaying),
-    setFocus: useFilterStore((state) => state.setFocus),
-    clearFocus: useFilterStore((state) => state.clearFocus),
-    resetAll: useFilterStore((state) => state.resetAll),
-    isNetworkFullscreen: useFilterStore((state) => state.isNetworkFullscreen),
-    setNetworkFullscreen: useFilterStore((state) => state.setNetworkFullscreen)
-  };
-
-  const query = useMemo<QueryState>(
-    () => ({
-      time,
-      playback,
-      focus,
-      filters,
-      textQuery,
-      sort
-    }),
-    [filters, focus, playback, sort, textQuery, time]
+  const actions = useFilterStoreShallow<AppActions>(
+    (state) => ({
+      setStateFromUrl: state.setStateFromUrl,
+      setTimeRange: state.setTimeRange,
+      setPlayhead: state.setPlayhead,
+      setPlaying: state.setPlaying,
+      setFocus: state.setFocus,
+      clearFocus: state.clearFocus,
+      resetAll: state.resetAll,
+      isNetworkFullscreen: state.isNetworkFullscreen,
+      setNetworkFullscreen: state.setNetworkFullscreen
+    })
   );
 
-  return { query, actions };
+  return useMemo(() => ({ query, actions }), [actions, query]);
 }

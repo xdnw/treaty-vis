@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import ReactECharts from "echarts-for-react";
 import type { PulsePoint } from "@/domain/timelapse/selectors";
+import { dayToEndIso, dayToStartIso } from "@/lib/dateTime";
 
 type Props = {
   pulse: PulsePoint[];
@@ -12,10 +13,6 @@ type Props = {
   onSetPlayhead: (playhead: string | null) => void;
   onSetRange: (start: string | null, end: string | null) => void;
 };
-
-function dayToEndIso(day: string): string {
-  return `${day}T23:59:59.999Z`;
-}
 
 export function TimelineView({ pulse, playhead, timeRange, onSetPlayhead, onSetRange }: Props) {
   const pendingZoomRef = useRef<{ startValue: number; endValue: number } | null>(null);
@@ -162,7 +159,7 @@ export function TimelineView({ pulse, playhead, timeRange, onSetPlayhead, onSetR
           const safeEndIndex = Math.max(0, Math.min(pending.endValue, pulse.length - 1));
           const startDay = pulse[safeStartIndex]?.day;
           const endDay = pulse[safeEndIndex]?.day;
-          const nextStart = startDay ? `${startDay}T00:00:00.000Z` : null;
+          const nextStart = startDay ? dayToStartIso(startDay) : null;
           const nextEnd = endDay ? dayToEndIso(endDay) : null;
 
           if (lastRangeRef.current.start === nextStart && lastRangeRef.current.end === nextEnd) {

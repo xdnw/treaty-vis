@@ -57,7 +57,7 @@ export type QueryState = {
   };
 };
 
-type FilterStore = {
+export type FilterStore = {
   query: QueryState;
   isNetworkFullscreen: boolean;
   setStateFromUrl: (state: Partial<QueryState>) => void;

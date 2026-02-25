@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { formatIsoDate } from "@/lib/format";
 import type { TimelapseEvent } from "@/domain/timelapse/schema";
+import { compareTimelapseEvents } from "@/domain/timelapse/queryEngine";
 
 type Props = {
   events: TimelapseEvent[];
@@ -21,50 +22,6 @@ const ACTION_LABELS: Record<string, string> = {
   inferred_cancelled: "Inferred Cancelled"
 };
 
-function compareEvents(left: TimelapseEvent, right: TimelapseEvent, field: InspectorSortField): number {
-  if (field === "timestamp") {
-    const ts = left.timestamp.localeCompare(right.timestamp);
-    if (ts !== 0) {
-      return ts;
-    }
-  } else if (field === "action") {
-    const action = left.action.localeCompare(right.action);
-    if (action !== 0) {
-      return action;
-    }
-  } else if (field === "type") {
-    const type = left.treaty_type.localeCompare(right.treaty_type);
-    if (type !== 0) {
-      return type;
-    }
-  } else if (field === "from") {
-    const from = (left.from_alliance_name || String(left.from_alliance_id)).localeCompare(
-      right.from_alliance_name || String(right.from_alliance_id)
-    );
-    if (from !== 0) {
-      return from;
-    }
-  } else if (field === "to") {
-    const to = (left.to_alliance_name || String(left.to_alliance_id)).localeCompare(
-      right.to_alliance_name || String(right.to_alliance_id)
-    );
-    if (to !== 0) {
-      return to;
-    }
-  } else {
-    const source = (left.source || "unknown").localeCompare(right.source || "unknown");
-    if (source !== 0) {
-      return source;
-    }
-  }
-
-  const id = left.event_id.localeCompare(right.event_id);
-  if (id !== 0) {
-    return id;
-  }
-  return left.timestamp.localeCompare(right.timestamp);
-}
-
 export function InspectorView({ events, onSelectPlayhead, onFocusAlliance }: Props) {
   const rowHeight = 38;
   const viewportHeight = 420;
@@ -74,8 +31,7 @@ export function InspectorView({ events, onSelectPlayhead, onFocusAlliance }: Pro
   const [sortDirection, setSortDirection] = useState<InspectorSortDirection>("desc");
 
   const sortedEvents = useMemo(() => {
-    const direction = sortDirection === "asc" ? 1 : -1;
-    return [...events].sort((left, right) => compareEvents(left, right, sortField) * direction);
+    return [...events].sort((left, right) => compareTimelapseEvents(left, right, sortField, sortDirection));
   }, [events, sortDirection, sortField]);
 
   const totalHeight = sortedEvents.length * rowHeight;

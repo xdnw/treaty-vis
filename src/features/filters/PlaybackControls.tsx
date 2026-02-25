@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { type PlaybackSpeed, useFilterStore } from "@/features/filters/filterStore";
+import { type PlaybackSpeed } from "@/features/filters/filterStore";
+import { useFilterStoreShallow } from "@/features/filters/useFilterStoreShallow";
 
 type Props = {
   timelineTicks: string[];
@@ -9,12 +10,14 @@ type Props = {
 const PLAYBACK_SPEEDS: PlaybackSpeed[] = [1, 2, 4, 8, 16, 32];
 
 export function PlaybackControls({ timelineTicks, className }: Props) {
-  const playhead = useFilterStore((state) => state.query.playback.playhead);
-  const isPlaying = useFilterStore((state) => state.query.playback.isPlaying);
-  const speed = useFilterStore((state) => state.query.playback.speed);
-  const setPlayhead = useFilterStore((state) => state.setPlayhead);
-  const setPlaying = useFilterStore((state) => state.setPlaying);
-  const setPlaybackSpeed = useFilterStore((state) => state.setPlaybackSpeed);
+  const { playhead, isPlaying, speed, setPlayhead, setPlaying, setPlaybackSpeed } = useFilterStoreShallow((state) => ({
+    playhead: state.query.playback.playhead,
+    isPlaying: state.query.playback.isPlaying,
+    speed: state.query.playback.speed,
+    setPlayhead: state.setPlayhead,
+    setPlaying: state.setPlaying,
+    setPlaybackSpeed: state.setPlaybackSpeed
+  }));
 
   const playheadIndex = useMemo(() => {
     if (timelineTicks.length === 0) {

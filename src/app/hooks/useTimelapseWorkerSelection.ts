@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 import { selectTimelapseIndexes, selectTimelapsePulse, type TimelapseDataBundle } from "@/domain/timelapse/loader";
 import type { PulsePoint } from "@/domain/timelapse/selectors";
 import type { QueryState } from "@/features/filters/filterStore";
+import { useAsyncWorkerRequest } from "@/app/hooks/useAsyncWorkerRequest";
 
 export function useTimelapseWorkerSelection(params: {
   bundle: TimelapseDataBundle | null;
@@ -9,62 +10,39 @@ export function useTimelapseWorkerSelection(params: {
   onError: (message: string) => void;
 }) {
   const { bundle, baseQuery, onError } = params;
-  const [scopedSelectionIndexes, setScopedSelectionIndexes] = useState<number[]>([]);
-  const [pulse, setPulse] = useState<PulsePoint[]>([]);
+  const enabled = Boolean(bundle);
+  const selectionRequest = useCallback(
+    async () => Array.from(await selectTimelapseIndexes(baseQuery)),
+    [baseQuery]
+  );
+  const pulseRequest = useCallback(
+    () => selectTimelapsePulse(baseQuery, 280, null),
+    [baseQuery]
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!bundle) {
-      setScopedSelectionIndexes([]);
-      return;
-    }
+  const { data: scopedSelectionIndexes } = useAsyncWorkerRequest<number[]>({
+    enabled,
+    dependencies: [enabled, baseQuery, selectionRequest],
+    initialData: [],
+    request: selectionRequest,
+    formatError: (reason) => {
+      const message = reason instanceof Error ? reason.message : "Unknown worker selection error";
+      return `[timelapse] Selection pipeline failed: ${message}`;
+    },
+    onError
+  });
 
-    void selectTimelapseIndexes(baseQuery)
-      .then((workerIndexes) => {
-        if (cancelled) {
-          return;
-        }
-        setScopedSelectionIndexes(Array.from(workerIndexes));
-      })
-      .catch((reason) => {
-        if (cancelled) {
-          return;
-        }
-        const message = reason instanceof Error ? reason.message : "Unknown worker selection error";
-        onError(`[timelapse] Selection pipeline failed: ${message}`);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [baseQuery, bundle, onError]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!bundle) {
-      setPulse([]);
-      return;
-    }
-
-    void selectTimelapsePulse(baseQuery, 280, null)
-      .then((nextPulse) => {
-        if (cancelled) {
-          return;
-        }
-        setPulse(nextPulse);
-      })
-      .catch((reason) => {
-        if (cancelled) {
-          return;
-        }
-        const message = reason instanceof Error ? reason.message : "Unknown worker pulse error";
-        onError(`[timelapse] Pulse pipeline failed: ${message}`);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [baseQuery, bundle, onError]);
+  const { data: pulse } = useAsyncWorkerRequest<PulsePoint[]>({
+    enabled,
+    dependencies: [enabled, baseQuery, pulseRequest],
+    initialData: [],
+    request: pulseRequest,
+    formatError: (reason) => {
+      const message = reason instanceof Error ? reason.message : "Unknown worker pulse error";
+      return `[timelapse] Pulse pipeline failed: ${message}`;
+    },
+    onError
+  });
 
   return {
     scopedSelectionIndexes,

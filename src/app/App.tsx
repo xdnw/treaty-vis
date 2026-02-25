@@ -210,6 +210,71 @@ export function App() {
     }
   };
 
+  const networkViewSharedProps = useMemo(
+    () => ({
+      allEvents: bundle?.events ?? [],
+      scopedIndexes: scopedSelectionIndexes,
+      baseQuery,
+      playhead: query.playback.playhead,
+      focusedAllianceId: query.focus.allianceId,
+      focusedEdgeKey: query.focus.edgeKey,
+      sizeByScore: query.filters.sizeByScore,
+      scoreSizeContrast: query.filters.scoreSizeContrast,
+      maxNodeRadius: query.filters.maxNodeRadius,
+      showFlags,
+      flagAssetsPayload: bundle?.flagAssetsPayload ?? null,
+      allianceScoresByDay: allianceScores?.byDay ?? null,
+      allianceScoreDays,
+      scoreLoadSnapshot,
+      scoreManifestDeclared: scoreFileDeclared,
+      onRetryScoreLoad: retryScoreLoad,
+      resolveAllianceFlagAtPlayhead,
+      onFocusAlliance: (allianceId: number | null) => actions.setFocus({ allianceId, edgeKey: null, eventId: null }),
+      onFocusEdge: (edgeKey: string | null) =>
+        actions.setFocus({ allianceId: query.focus.allianceId, edgeKey, eventId: null }),
+      onEnterFullscreen: () => actions.setNetworkFullscreen(true),
+      onExitFullscreen: () => actions.setNetworkFullscreen(false),
+      isPlaying: query.playback.isPlaying
+    }),
+    [
+      actions,
+      allianceScoreDays,
+      allianceScores?.byDay,
+      baseQuery,
+      bundle?.events,
+      bundle?.flagAssetsPayload,
+      query.filters.maxNodeRadius,
+      query.filters.scoreSizeContrast,
+      query.filters.sizeByScore,
+      query.focus.allianceId,
+      query.focus.edgeKey,
+      query.playback.isPlaying,
+      query.playback.playhead,
+      resolveAllianceFlagAtPlayhead,
+      retryScoreLoad,
+      scopedSelectionIndexes,
+      scoreFileDeclared,
+      scoreLoadSnapshot,
+      showFlags
+    ]
+  );
+
+  const renderNetworkView = useCallback(
+    (overrides: {
+      isFullscreen: boolean;
+      forceFullscreenLabels: boolean;
+      onFullscreenHintChange?: (hint: NetworkAllianceHintData | null) => void;
+    }) => (
+      <NetworkView
+        {...networkViewSharedProps}
+        isFullscreen={overrides.isFullscreen}
+        forceFullscreenLabels={overrides.forceFullscreenLabels}
+        onFullscreenHintChange={overrides.onFullscreenHintChange}
+      />
+    ),
+    [networkViewSharedProps]
+  );
+
   if (loading) {
     return <main className="mx-auto max-w-7xl p-6">Loading timelapse dataset...</main>;
   }
@@ -271,7 +336,7 @@ export function App() {
               </button>
               <button
                 type="button"
-                className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+                className="rounded-md border bg-red-200 border-red-300 px-2 py-1 text-xs hover:bg-red-50 active:bg-red-100"
                 onClick={actions.resetAll}
               >
                 Reset All State
@@ -323,33 +388,7 @@ export function App() {
               />
             </Suspense>
             <Suspense fallback={<section className="panel p-4 text-sm text-muted">Loading network view...</section>}>
-              <NetworkView
-                allEvents={bundle.events}
-                scopedIndexes={scopedSelectionIndexes}
-                baseQuery={baseQuery}
-                playhead={query.playback.playhead}
-                focusedAllianceId={query.focus.allianceId}
-                focusedEdgeKey={query.focus.edgeKey}
-                sizeByScore={query.filters.sizeByScore}
-                scoreSizeContrast={query.filters.scoreSizeContrast}
-                maxNodeRadius={query.filters.maxNodeRadius}
-                showFlags={showFlags}
-                flagAssetsPayload={bundle.flagAssetsPayload}
-                allianceScoresByDay={allianceScores?.byDay ?? null}
-                allianceScoreDays={allianceScoreDays}
-                scoreLoadSnapshot={scoreLoadSnapshot}
-                scoreManifestDeclared={scoreFileDeclared}
-                onRetryScoreLoad={retryScoreLoad}
-                resolveAllianceFlagAtPlayhead={resolveAllianceFlagAtPlayhead}
-                onFocusAlliance={(allianceId) => actions.setFocus({ allianceId, edgeKey: null, eventId: null })}
-                onFocusEdge={(edgeKey) => actions.setFocus({ allianceId: query.focus.allianceId, edgeKey, eventId: null })}
-                isFullscreen={false}
-                onEnterFullscreen={() => actions.setNetworkFullscreen(true)}
-                onExitFullscreen={() => actions.setNetworkFullscreen(false)}
-                forceFullscreenLabels={false}
-                isPlaying={query.playback.isPlaying}
-                onFullscreenHintChange={undefined}
-              />
+              {renderNetworkView({ isFullscreen: false, forceFullscreenLabels: false })}
             </Suspense>
           </section>
 
@@ -366,33 +405,11 @@ export function App() {
           <div className="grid h-full min-h-0 grid-rows-[1fr_auto] gap-2 md:grid-cols-[1fr_340px] md:grid-rows-1 md:gap-3">
             <div className="min-h-0 md:row-span-1">
               <Suspense fallback={<section className="panel h-full p-4 text-sm text-muted">Loading network view...</section>}>
-                <NetworkView
-                  allEvents={bundle.events}
-                  scopedIndexes={scopedSelectionIndexes}
-                  baseQuery={baseQuery}
-                  playhead={query.playback.playhead}
-                  focusedAllianceId={query.focus.allianceId}
-                  focusedEdgeKey={query.focus.edgeKey}
-                  sizeByScore={query.filters.sizeByScore}
-                  scoreSizeContrast={query.filters.scoreSizeContrast}
-                  maxNodeRadius={query.filters.maxNodeRadius}
-                  showFlags={showFlags}
-                  flagAssetsPayload={bundle.flagAssetsPayload}
-                  allianceScoresByDay={allianceScores?.byDay ?? null}
-                  allianceScoreDays={allianceScoreDays}
-                  scoreLoadSnapshot={scoreLoadSnapshot}
-                  scoreManifestDeclared={scoreFileDeclared}
-                  onRetryScoreLoad={retryScoreLoad}
-                  resolveAllianceFlagAtPlayhead={resolveAllianceFlagAtPlayhead}
-                  onFocusAlliance={(allianceId) => actions.setFocus({ allianceId, edgeKey: null, eventId: null })}
-                  onFocusEdge={(edgeKey) => actions.setFocus({ allianceId: query.focus.allianceId, edgeKey, eventId: null })}
-                  isFullscreen
-                  onEnterFullscreen={() => actions.setNetworkFullscreen(true)}
-                  onExitFullscreen={() => actions.setNetworkFullscreen(false)}
-                  forceFullscreenLabels
-                  isPlaying={query.playback.isPlaying}
-                  onFullscreenHintChange={setNetworkFullscreenHint}
-                />
+                {renderNetworkView({
+                  isFullscreen: true,
+                  forceFullscreenLabels: true,
+                  onFullscreenHintChange: setNetworkFullscreenHint
+                })}
               </Suspense>
             </div>
             <aside className="panel flex min-h-0 flex-col gap-3 p-3 md:overflow-auto">

@@ -14,7 +14,8 @@
     "data:generate:top50": ".venv\\Scripts\\python.exe .\\scripts\\generate_timelapse_data.py --infer-expiry-cancels --infer-deletion-cancels --top50-mode strict --output .\\public\\data\\treaty_changes_reconciled_top50_strict.msgpack --summary-output .\\public\\data\\treaty_changes_reconciled_top50_strict_summary.msgpack --flags-output .\\public\\data\\treaty_changes_reconciled_top50_strict_flags.msgpack --collapse-churn",
     "data:score": ".venv\\Scripts\\python.exe .\\scripts\\score.py --download-missing-alliance-archives --pretty",
     "data:refresh": "npm run data:generate && npm run data:score && npm run data:flags && npm run data:sync",
-    "data:flags": ".venv\\Scripts\\python.exe .\\scripts\\flags.py --download-missing-alliance-archives --pretty"
+    "data:flags": ".venv\\Scripts\\python.exe .\\scripts\\flags.py --download-missing-alliance-archives --pretty",
+    "data:flags:legacy": ".venv\\Scripts\\python.exe .\\scripts\\flags.py --legacy-backfill-only --legacy-imgbb-only --pretty"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.2",

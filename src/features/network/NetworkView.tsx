@@ -4,7 +4,7 @@ import Sigma from "sigma";
 import type { ScoreLoaderSnapshot } from "@/domain/timelapse/scoreLoader";
 import type { AllianceFlagSnapshot, AllianceScoresByDay, FlagAssetsPayload, TimelapseEvent } from "@/domain/timelapse/schema";
 import { resolveScoreRowForPlayhead } from "@/domain/timelapse/scoreDay";
-import { NODE_MAX_RADIUS_DEFAULT, type QueryState, useFilterStore } from "@/features/filters/filterStore";
+import { type QueryState, useFilterStore } from "@/features/filters/filterStore";
 import { dampPosition, positionForNode, type Point } from "@/features/network/layout";
 import {
   FLAG_MAX_SPRITES,
@@ -22,6 +22,15 @@ import {
   quantizePlayheadIndexForAutoplay,
   shouldForceNodeLabel
 } from "@/features/network/networkViewPolicy";
+import { pushNetworkFlagDiagnostic } from "@/features/network/networkViewDiagnostics";
+import {
+  applyScoreContrast,
+  colorWithOpacity,
+  degreeRadius,
+  resolveAllianceScoreWithFallback,
+  scoreRadiusWithContrast,
+  DEFAULT_MAX_NODE_RADIUS
+} from "@/features/network/networkGraphMath";
 import { NetworkAllianceHint, type NetworkAllianceHintData } from "@/features/network/NetworkAllianceHint";
 import { NetworkViewPanel } from "@/features/network/NetworkViewPanel";
 import { EDGE_FALLBACK_COLOR, TREATY_TYPE_STYLES } from "@/features/network/networkViewLegend";
@@ -32,49 +41,11 @@ const LABEL_TEXT_COLOR = "#1f2937";
 const BASE_EDGE_OPACITY = 0.62;
 const FOCUSED_ADJACENT_EDGE_OPACITY = 0.84;
 const HIGHLIGHTED_EDGE_OPACITY = 0.95;
-const MIN_NODE_RADIUS = 5;
-export const DEFAULT_MAX_NODE_RADIUS = NODE_MAX_RADIUS_DEFAULT;
 const NON_ANCHORED_DAMPING = 0.22;
 const ZOOM_BAND_ZOOMED_IN_MAX_RATIO = 1.25;
 const ZOOM_BAND_MID_MAX_RATIO = 2.35;
 const FLAG_SIZE_TO_NODE_RATIO = 1.45;
 const FLAG_MIN_DRAW_SIZE = 10;
-
-type NetworkFlagDiagnosticSample = {
-  stage: "graph-build" | "refresh";
-  ts: number;
-  cameraRatio: number;
-  nodeCount: number;
-  framePressureScore: number;
-  framePressure: boolean;
-  framePressureLevel: FlagPressureLevel;
-  mode: FlagRenderMode;
-  spriteCandidateCount: number;
-  refreshMs?: number;
-  graphBuildMs?: number;
-};
-
-function pushNetworkFlagDiagnostic(sample: NetworkFlagDiagnosticSample): void {
-  if (!import.meta.env.DEV || typeof window === "undefined") {
-    return;
-  }
-
-  const perfWindow = window as Window & {
-    __timelapsePerf?: { enabled?: boolean };
-    __networkFlagDiagnostics?: NetworkFlagDiagnosticSample[];
-  };
-
-  if (!perfWindow.__timelapsePerf?.enabled) {
-    return;
-  }
-
-  const entries = perfWindow.__networkFlagDiagnostics ?? [];
-  entries.push(sample);
-  if (entries.length > 240) {
-    entries.splice(0, entries.length - 240);
-  }
-  perfWindow.__networkFlagDiagnostics = entries;
-}
 
 type ZoomBand = "zoomed-out" | "mid" | "zoomed-in";
 
@@ -113,96 +84,10 @@ function calcMaxEdges(width: number, height: number): number {
   return Math.max(240, Math.min(2400, adaptive));
 }
 
-function clampRadius(value: number, maxNodeRadius: number): number {
-  return Math.max(MIN_NODE_RADIUS, Math.min(maxNodeRadius, value));
-}
-
 function canonicalTreatyTypeKey(value: string): string {
   return value.trim().replace(/\s+/g, " ").toUpperCase();
 }
-
-function colorWithOpacity(hexColor: string, opacity: number): string {
-  const boundedOpacity = Math.max(0, Math.min(1, opacity));
-  const raw = hexColor.trim();
-  const sixDigitHex = raw.length === 4 ? `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}` : raw;
-  const match = /^#([0-9a-fA-F]{6})$/.exec(sixDigitHex);
-  if (!match) {
-    return hexColor;
-  }
-  const hex = match[1];
-  const red = parseInt(hex.slice(0, 2), 16);
-  const green = parseInt(hex.slice(2, 4), 16);
-  const blue = parseInt(hex.slice(4, 6), 16);
-  return `rgba(${red}, ${green}, ${blue}, ${boundedOpacity})`;
-}
-
-function degreeRadius(degree: number, maxNodeRadius: number): number {
-  return clampRadius(3 + Math.log2(degree + 1) * 1.2, maxNodeRadius);
-}
-
-export function applyScoreContrast(normalizedScore: number, contrast: number): number {
-  const clampedScore = Math.max(0, Math.min(1, normalizedScore));
-  if (!Number.isFinite(contrast) || contrast <= 0 || Math.abs(contrast - 1) <= Number.EPSILON) {
-    return clampedScore;
-  }
-  return Math.pow(clampedScore, contrast);
-}
-
-export function scoreRadiusWithContrast(
-  score: number,
-  minScore: number,
-  maxScore: number,
-  contrast: number,
-  maxNodeRadius: number = DEFAULT_MAX_NODE_RADIUS
-): number {
-  if (score <= 0 || minScore <= 0 || maxScore <= 0) {
-    return MIN_NODE_RADIUS;
-  }
-
-  if (maxScore - minScore <= Number.EPSILON) {
-    return maxNodeRadius;
-  }
-
-  const safeScore = Math.max(minScore, Math.min(maxScore, score));
-  const range = maxScore - minScore;
-  if (!Number.isFinite(range) || range <= 0) {
-    return maxNodeRadius;
-  }
-
-  const normalized = (safeScore - minScore) / range;
-  const contrasted = applyScoreContrast(normalized, contrast);
-  return clampRadius(MIN_NODE_RADIUS + contrasted * (maxNodeRadius - MIN_NODE_RADIUS), maxNodeRadius);
-}
-
-function resolveAllianceScoreWithFallback(
-  allianceId: string,
-  scoreByDay: Record<string, Record<string, number>>,
-  scoreDays: string[],
-  startDay: string | null
-): number | null {
-  if (!startDay) {
-    return null;
-  }
-
-  const startIndex = scoreDays.indexOf(startDay);
-  if (startIndex < 0) {
-    return null;
-  }
-
-  for (let index = startIndex; index >= 0; index -= 1) {
-    const day = scoreDays[index];
-    const row = scoreByDay[day];
-    if (!row) {
-      continue;
-    }
-    const score = row[allianceId];
-    if (typeof score === "number" && Number.isFinite(score) && score > 0) {
-      return score;
-    }
-  }
-
-  return null;
-}
+export { applyScoreContrast, scoreRadiusWithContrast, DEFAULT_MAX_NODE_RADIUS };
 
 function deriveZoomBand(cameraRatio: number): ZoomBand {
   if (cameraRatio <= ZOOM_BAND_ZOOMED_IN_MAX_RATIO) {

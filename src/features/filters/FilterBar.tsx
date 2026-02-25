@@ -5,6 +5,7 @@ import {
   SCORE_SIZE_CONTRAST_MAX,
   SCORE_SIZE_CONTRAST_MIN
 } from "@/features/filters/filterStore";
+import { dateTimeLocalToIso, isoToDateTimeLocal } from "@/lib/dateTime";
 import { PlaybackControls } from "@/features/filters/PlaybackControls";
 import type { TimelapseIndices } from "@/domain/timelapse/selectors";
 import { useFilterBarViewModel } from "@/features/filters/useFilterBarViewModel";
@@ -26,33 +27,6 @@ const SORT_FIELDS = [
   { value: "to", label: "To Alliance" },
   { value: "source", label: "Source" }
 ] as const;
-
-function isoToDateTimeLocal(value: string | null): string {
-  if (!value) {
-    return "";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  const year = String(date.getFullYear());
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-function dateTimeLocalToIso(value: string): string | null {
-  if (!value) {
-    return null;
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-  return date.toISOString();
-}
 
 export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankData }: Props) {
   const { query, actions, isNetworkFullscreen, casts } = useFilterBarViewModel();

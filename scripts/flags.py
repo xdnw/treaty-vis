@@ -48,6 +48,7 @@ EXPECTED_FLAG_KEYS = {"flag", "allianceflag", "flagurl"}
 
 DEFAULT_ARCHIVE_CDX_ENDPOINT = "https://web.archive.org/cdx/search/cdx"
 DEFAULT_ARCHIVE_REPLAY_PREFIX = "https://web.archive.org/web"
+DEFAULT_LEGACY_FLAGS_PATH = Path("data") / "legacy_flags.csv"
 
 
 def parse_args() -> argparse.Namespace:
@@ -218,6 +219,22 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Base retry delay for archive requests (with stronger 429 handling)",
+    )
+    parser.add_argument(
+        "--legacy-flags-csv",
+        default=str(DEFAULT_LEGACY_FLAGS_PATH),
+        help="Tab-delimited legacy flags CSV source (Alliances, Flag)",
+    )
+    parser.add_argument(
+        "--legacy-imgbb-only",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Keep only legacy URLs hosted on imgbb/i.ibb.co",
+    )
+    parser.add_argument(
+        "--legacy-backfill-only",
+        action="store_true",
+        help="Only download legacy-injected URLs when rebuilding outputs",
     )
     return parser.parse_args()
 
@@ -423,6 +440,245 @@ def build_flag_events(files: list[Path]) -> list[dict[str, Any]]:
     )
 
     return events
+
+
+def canonicalize_alliance_name(value: Any) -> str:
+    text = normalize_text(value).lower()
+    if not text:
+        return ""
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def is_legacy_imgbb_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = str(parsed.netloc or "").lower()
+    if not host:
+        return False
+    host = host.split(":", 1)[0]
+    return host == "imgbb.com" or host.endswith(".imgbb.com") or host == "i.ibb.co" or host.endswith(".i.ibb.co")
+
+
+def parse_legacy_flags_csv(
+    path: Path,
+    *,
+    imgbb_only: bool,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    counters = {
+        "legacy_rows_read": 0,
+        "legacy_blank_flag": 0,
+        "legacy_non_http": 0,
+        "legacy_skipped_non_imgbb": 0,
+        "legacy_imgbb_kept": 0,
+    }
+    out_rows: list[dict[str, Any]] = []
+
+    if not path.exists():
+        return out_rows, counters
+
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        for index, row in enumerate(reader, start=2):
+            counters["legacy_rows_read"] += 1
+            row_lookup = build_row_lookup(row)
+            alliance_name = normalize_text(first_present(row_lookup, ("alliances", "alliance", "name")))
+            raw_flag_url = normalize_text(first_present(row_lookup, ("flag", "flagurl", "allianceflag")))
+
+            if not raw_flag_url:
+                counters["legacy_blank_flag"] += 1
+                continue
+
+            if not is_supported_remote_url(raw_flag_url):
+                counters["legacy_non_http"] += 1
+                continue
+
+            if imgbb_only and not is_legacy_imgbb_url(raw_flag_url):
+                counters["legacy_skipped_non_imgbb"] += 1
+                continue
+
+            out_rows.append(
+                {
+                    "row_num": index,
+                    "alliance_name": alliance_name,
+                    "canonical_name": canonicalize_alliance_name(alliance_name),
+                    "raw_flag_url": raw_flag_url,
+                }
+            )
+            counters["legacy_imgbb_kept"] += 1
+
+    return out_rows, counters
+
+
+def build_canonical_name_to_alliance_id(raw_events: list[dict[str, Any]]) -> tuple[dict[str, int], set[str]]:
+    id_sets: dict[str, set[int]] = {}
+    for event in raw_events:
+        alliance_id = int(event.get("alliance_id") or 0)
+        if alliance_id <= 0:
+            continue
+        canonical_name = canonicalize_alliance_name(event.get("alliance_name") or "")
+        if not canonical_name:
+            continue
+        id_sets.setdefault(canonical_name, set()).add(alliance_id)
+
+    name_to_id: dict[str, int] = {}
+    ambiguous: set[str] = set()
+    for canonical_name, candidates in id_sets.items():
+        if len(candidates) == 1:
+            name_to_id[canonical_name] = next(iter(candidates))
+        elif len(candidates) > 1:
+            ambiguous.add(canonical_name)
+    return name_to_id, ambiguous
+
+
+def build_alliance_name_by_id(raw_events: list[dict[str, Any]]) -> dict[int, str]:
+    by_id: dict[int, str] = {}
+    for event in raw_events:
+        alliance_id = int(event.get("alliance_id") or 0)
+        if alliance_id <= 0:
+            continue
+        name = normalize_text(event.get("alliance_name") or "")
+        if name:
+            by_id[alliance_id] = name
+    return by_id
+
+
+def build_alliance_flag_coverage(raw_events: list[dict[str, Any]]) -> dict[int, bool]:
+    coverage: dict[int, bool] = {}
+    for event in raw_events:
+        alliance_id = int(event.get("alliance_id") or 0)
+        if alliance_id <= 0:
+            continue
+        has_flag = bool(normalize_text(event.get("raw_flag_url") or ""))
+        coverage[alliance_id] = bool(coverage.get(alliance_id) or has_flag)
+    return coverage
+
+
+def compute_global_min_archive_timestamp(files: list[Path]) -> str | None:
+    min_day: datetime | None = None
+    for path in files:
+        day = parse_day_from_filename(path)
+        if day is None:
+            continue
+        if min_day is None or day < min_day:
+            min_day = day
+    if min_day is None:
+        return None
+    return dt_to_iso(min_day)
+
+
+def sort_and_dedupe_events(raw_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    action_order = {"initial": 0, "created": 1, "changed": 2}
+    sorted_events = sorted(
+        raw_events,
+        key=lambda event: (
+            str(event.get("timestamp") or ""),
+            int(event.get("alliance_id") or 0),
+            int(action_order.get(str(event.get("action") or ""), 99)),
+            str(event.get("raw_flag_url") or ""),
+            str(event.get("raw_previous_flag_url") or ""),
+            str(event.get("source_ref") or ""),
+        ),
+    )
+
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, int, str, str]] = set()
+    for event in sorted_events:
+        dedupe_key = (
+            str(event.get("timestamp") or ""),
+            str(event.get("action") or ""),
+            int(event.get("alliance_id") or 0),
+            str(event.get("raw_flag_url") or ""),
+            str(event.get("raw_previous_flag_url") or ""),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        out.append(event)
+    return out
+
+
+def inject_legacy_flag_backfill(
+    raw_events: list[dict[str, Any]],
+    *,
+    files: list[Path],
+    legacy_csv_path: Path,
+    legacy_imgbb_only: bool,
+) -> tuple[list[dict[str, Any]], dict[str, int], set[str]]:
+    counters = {
+        "legacy_rows_read": 0,
+        "legacy_blank_flag": 0,
+        "legacy_non_http": 0,
+        "legacy_skipped_non_imgbb": 0,
+        "legacy_imgbb_kept": 0,
+        "legacy_unmatched": 0,
+        "legacy_ambiguous": 0,
+        "legacy_injected": 0,
+    }
+
+    legacy_rows, parse_counts = parse_legacy_flags_csv(legacy_csv_path, imgbb_only=legacy_imgbb_only)
+    counters.update(parse_counts)
+    if not legacy_rows:
+        return raw_events, counters, set()
+
+    timestamp = compute_global_min_archive_timestamp(files)
+    if not timestamp:
+        return raw_events, counters, set()
+
+    name_to_id, ambiguous_names = build_canonical_name_to_alliance_id(raw_events)
+    alliance_name_by_id = build_alliance_name_by_id(raw_events)
+    coverage_by_id = build_alliance_flag_coverage(raw_events)
+
+    # Keep first deterministic row per alliance id to avoid conflicting synthetic seeds.
+    candidate_by_alliance_id: dict[int, dict[str, Any]] = {}
+    for row in legacy_rows:
+        canonical_name = str(row.get("canonical_name") or "")
+        if not canonical_name:
+            counters["legacy_unmatched"] += 1
+            continue
+        if canonical_name in ambiguous_names:
+            counters["legacy_ambiguous"] += 1
+            continue
+        alliance_id = int(name_to_id.get(canonical_name) or 0)
+        if alliance_id <= 0:
+            counters["legacy_unmatched"] += 1
+            continue
+        if bool(coverage_by_id.get(alliance_id)):
+            continue
+        if alliance_id not in candidate_by_alliance_id:
+            candidate_by_alliance_id[alliance_id] = row
+
+    if not candidate_by_alliance_id:
+        return raw_events, counters, set()
+
+    injected_urls: set[str] = set()
+    merged_events = list(raw_events)
+    for alliance_id in sorted(candidate_by_alliance_id.keys()):
+        row = candidate_by_alliance_id[alliance_id]
+        raw_url = str(row.get("raw_flag_url") or "").strip()
+        if not raw_url:
+            continue
+        alliance_name = alliance_name_by_id.get(alliance_id) or str(row.get("alliance_name") or "")
+        row_num = int(row.get("row_num") or 0)
+        merged_events.append(
+            {
+                "timestamp": timestamp,
+                "action": "initial",
+                "alliance_id": alliance_id,
+                "alliance_name": alliance_name,
+                "raw_flag_url": raw_url,
+                "source_ref": f"legacy_flags.csv:{row_num}:{alliance_id}",
+            }
+        )
+        counters["legacy_injected"] += 1
+        injected_urls.add(raw_url)
+
+    return sort_and_dedupe_events(merged_events), counters, injected_urls
 
 
 def ensure_pillow() -> None:
@@ -1123,6 +1379,7 @@ def collect_flag_assets(
     archive_concurrency: int,
     archive_max_retries: int,
     archive_retry_base_delay: float,
+    download_url_allowlist: set[str] | None = None,
 ) -> tuple[dict[str, str], dict[str, Any], dict[str, str]]:
     url_set: set[str] = set()
     for event in events:
@@ -1155,8 +1412,9 @@ def collect_flag_assets(
         cache_path = resolve_cache_path(cache_dir, item, url)
         status = str(item.get("status") or "pending")
         repaired_stale = False
+        allow_download = download_url_allowlist is None or url in download_url_allowlist
 
-        if status == "downloaded" and not cache_path.exists():
+        if allow_download and status == "downloaded" and not cache_path.exists():
             stale_repairs += 1
             repaired_stale = True
             item = upsert_url_state(
@@ -1169,14 +1427,15 @@ def collect_flag_assets(
             status = "pending"
 
         include = False
-        if status in {"pending", "new", "queued"}:
-            include = (not retry_failed_only) or repaired_stale
-        elif status == "failed":
-            include = bool(retry_failed or retry_failed_only)
-        elif status == "downloaded":
-            include = False
-        else:
-            include = not retry_failed_only
+        if allow_download:
+            if status in {"pending", "new", "queued"}:
+                include = (not retry_failed_only) or repaired_stale
+            elif status == "failed":
+                include = bool(retry_failed or retry_failed_only)
+            elif status == "downloaded":
+                include = False
+            else:
+                include = not retry_failed_only
 
         worklist.append((url, item, include))
 
@@ -1752,11 +2011,14 @@ def main() -> int:
     atlas_png_output_path = Path(args.atlas_png_output).resolve()
     state_file = Path(args.state_file).resolve()
     cache_dir = Path(args.cache_dir).resolve()
+    effective_download_missing_archives = bool(args.download_missing_alliance_archives)
+    if args.legacy_backfill_only:
+        effective_download_missing_archives = False
 
     files, archive_flags = prepare_alliance_archives(
         alliances_dir=alliances_dir,
         index_url=str(args.alliances_index_url),
-        download_missing=bool(args.download_missing_alliance_archives),
+        download_missing=effective_download_missing_archives,
     )
     for flag in archive_flags:
         severity = str(flag.get("severity") or "info").lower()
@@ -1769,9 +2031,45 @@ def main() -> int:
     files.sort(key=lambda p: (parse_day_from_filename(p), p.name))
 
     raw_events = build_flag_events(files)
+    legacy_csv_path = Path(args.legacy_flags_csv).resolve()
+    raw_events, legacy_counters, legacy_injected_urls = inject_legacy_flag_backfill(
+        raw_events,
+        files=files,
+        legacy_csv_path=legacy_csv_path,
+        legacy_imgbb_only=bool(args.legacy_imgbb_only),
+    )
+    print(
+        "[flags] legacy backfill: "
+        f"source={legacy_csv_path} "
+        f"rows_read={legacy_counters['legacy_rows_read']} "
+        f"imgbb_kept={legacy_counters['legacy_imgbb_kept']} "
+        f"injected={legacy_counters['legacy_injected']} "
+        f"unmatched={legacy_counters['legacy_unmatched']} "
+        f"ambiguous={legacy_counters['legacy_ambiguous']} "
+        f"skipped_non_imgbb={legacy_counters['legacy_skipped_non_imgbb']} "
+        f"non_http={legacy_counters['legacy_non_http']} "
+        f"blank_flag={legacy_counters['legacy_blank_flag']}",
+        file=sys.stderr,
+    )
+
+    raw_events = sort_and_dedupe_events(raw_events)
+
+    effective_enable_archive_fallback = bool(args.enable_archive_fallback)
+    asset_download_allowlist: set[str] | None = None
+    if args.legacy_backfill_only:
+        effective_download_missing_archives = False
+        effective_enable_archive_fallback = False
+        asset_download_allowlist = set(legacy_injected_urls)
+        print(
+            "[flags] legacy-backfill-only: "
+            f"download_missing_alliance_archives={effective_download_missing_archives} "
+            f"archive_fallback={effective_enable_archive_fallback} "
+            f"allowed_download_urls={len(asset_download_allowlist)}",
+            file=sys.stderr,
+        )
 
     archive_context_by_url: dict[str, list[dict[str, Any]]] = {}
-    if args.enable_archive_fallback:
+    if effective_enable_archive_fallback:
         ranks_path = Path(args.archive_ranks_path).resolve()
         try:
             archive_context_by_url = build_archive_fallback_context(
@@ -1814,6 +2112,7 @@ def main() -> int:
         archive_concurrency=int(args.archive_concurrency),
         archive_max_retries=int(args.archive_max_retries),
         archive_retry_base_delay=float(args.archive_retry_base_delay),
+        download_url_allowlist=asset_download_allowlist,
     )
     runtime_events = build_runtime_events(raw_events, url_to_hash=url_to_hash, hash_to_key=hash_to_key)
     atlas, atlas_meta, assets = build_flag_atlas(

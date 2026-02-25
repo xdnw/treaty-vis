@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback } from "react";
 import { selectTimelapseNetworkEventIndexes } from "@/domain/timelapse/loader";
 import type { QueryState } from "@/features/filters/filterStore";
+import { useAsyncWorkerRequest } from "@/app/hooks/useAsyncWorkerRequest";
 
 export function useNetworkWorkerIndexes(params: {
   baseQuery: QueryState;
@@ -8,30 +9,20 @@ export function useNetworkWorkerIndexes(params: {
   maxEdges: number;
 }) {
   const { baseQuery, playhead, maxEdges } = params;
-  const [workerEdgeEventIndexes, setWorkerEdgeEventIndexes] = useState<number[] | null>(null);
-  const [workerError, setWorkerError] = useState<string | null>(null);
-  const requestRef = useRef(0);
+  const request = useCallback(
+    async () => Array.from(await selectTimelapseNetworkEventIndexes(baseQuery, playhead, maxEdges)),
+    [baseQuery, maxEdges, playhead]
+  );
 
-  useEffect(() => {
-    requestRef.current += 1;
-    const requestId = requestRef.current;
-    setWorkerError(null);
-
-    void selectTimelapseNetworkEventIndexes(baseQuery, playhead, maxEdges)
-      .then((workerIndexes) => {
-        if (requestRef.current !== requestId) {
-          return;
-        }
-        setWorkerEdgeEventIndexes(Array.from(workerIndexes));
-      })
-      .catch((reason) => {
-        if (requestRef.current !== requestId) {
-          return;
-        }
-        const message = reason instanceof Error ? reason.message : "Unknown network worker error";
-        setWorkerError(`[network] Worker pipeline failed: ${message}`);
-      });
-  }, [baseQuery, maxEdges, playhead]);
+  const { data: workerEdgeEventIndexes, error: workerError } = useAsyncWorkerRequest<number[] | null>({
+    dependencies: [baseQuery, playhead, maxEdges, request],
+    initialData: null as number[] | null,
+    request,
+    formatError: (reason) => {
+      const message = reason instanceof Error ? reason.message : "Unknown network worker error";
+      return `[network] Worker pipeline failed: ${message}`;
+    }
+  });
 
   return {
     workerEdgeEventIndexes,

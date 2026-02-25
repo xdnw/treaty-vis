@@ -1,32 +1,72 @@
+import { useMemo } from "react";
 import { useFilterStore, type SortDirection, type SortField } from "@/features/filters/filterStore";
+import { useFilterStoreShallow } from "@/features/filters/useFilterStoreShallow";
 
 export function useFilterBarViewModel() {
   const query = useFilterStore((state) => state.query);
-  const isNetworkFullscreen = useFilterStore((state) => state.isNetworkFullscreen);
+  const selected = useFilterStoreShallow((state) => ({
+    isNetworkFullscreen: state.isNetworkFullscreen,
+    setTextQuery: state.setTextQuery,
+    setSort: state.setSort,
+    setTimeRange: state.setTimeRange,
+    toggleAlliance: state.toggleAlliance,
+    toggleAction: state.toggleAction,
+    toggleTreatyType: state.toggleTreatyType,
+    toggleSource: state.toggleSource,
+    setIncludeInferred: state.setIncludeInferred,
+    setIncludeNoise: state.setIncludeNoise,
+    setEvidenceMode: state.setEvidenceMode,
+    setTopXByScore: state.setTopXByScore,
+    setSizeByScore: state.setSizeByScore,
+    setScoreSizeContrast: state.setScoreSizeContrast,
+    setMaxNodeRadius: state.setMaxNodeRadius,
+    setShowFlags: state.setShowFlags,
+    resetFilters: state.clearFilters
+  }));
 
-  const actions = {
-    setTextQuery: useFilterStore((state) => state.setTextQuery),
-    setSort: useFilterStore((state) => state.setSort),
-    setTimeRange: useFilterStore((state) => state.setTimeRange),
-    toggleAlliance: useFilterStore((state) => state.toggleAlliance),
-    toggleAction: useFilterStore((state) => state.toggleAction),
-    toggleTreatyType: useFilterStore((state) => state.toggleTreatyType),
-    toggleSource: useFilterStore((state) => state.toggleSource),
-    setIncludeInferred: useFilterStore((state) => state.setIncludeInferred),
-    setIncludeNoise: useFilterStore((state) => state.setIncludeNoise),
-    setEvidenceMode: useFilterStore((state) => state.setEvidenceMode),
-    setTopXByScore: useFilterStore((state) => state.setTopXByScore),
-    setSizeByScore: useFilterStore((state) => state.setSizeByScore),
-    setScoreSizeContrast: useFilterStore((state) => state.setScoreSizeContrast),
-    setMaxNodeRadius: useFilterStore((state) => state.setMaxNodeRadius),
-    setShowFlags: useFilterStore((state) => state.setShowFlags),
-    resetFilters: useFilterStore((state) => state.clearFilters)
-  };
+  const actions = useMemo(
+    () => ({
+      setTextQuery: selected.setTextQuery,
+      setSort: selected.setSort,
+      setTimeRange: selected.setTimeRange,
+      toggleAlliance: selected.toggleAlliance,
+      toggleAction: selected.toggleAction,
+      toggleTreatyType: selected.toggleTreatyType,
+      toggleSource: selected.toggleSource,
+      setIncludeInferred: selected.setIncludeInferred,
+      setIncludeNoise: selected.setIncludeNoise,
+      setEvidenceMode: selected.setEvidenceMode,
+      setTopXByScore: selected.setTopXByScore,
+      setSizeByScore: selected.setSizeByScore,
+      setScoreSizeContrast: selected.setScoreSizeContrast,
+      setMaxNodeRadius: selected.setMaxNodeRadius,
+      setShowFlags: selected.setShowFlags,
+      resetFilters: selected.resetFilters
+    }),
+    [
+      selected.resetFilters,
+      selected.setEvidenceMode,
+      selected.setIncludeInferred,
+      selected.setIncludeNoise,
+      selected.setMaxNodeRadius,
+      selected.setScoreSizeContrast,
+      selected.setShowFlags,
+      selected.setSizeByScore,
+      selected.setSort,
+      selected.setTextQuery,
+      selected.setTimeRange,
+      selected.setTopXByScore,
+      selected.toggleAction,
+      selected.toggleAlliance,
+      selected.toggleSource,
+      selected.toggleTreatyType
+    ]
+  );
 
   return {
     query,
     actions,
-    isNetworkFullscreen,
+    isNetworkFullscreen: selected.isNetworkFullscreen,
     casts: {
       toSortField: (value: string) => value as SortField,
       toSortDirection: (value: string) => value as SortDirection
