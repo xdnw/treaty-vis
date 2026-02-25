@@ -1,13 +1,13 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  loadAllianceScoresByDay,
   loadTimelapseBundle,
   resolveAllianceFlagSnapshot,
   selectTimelapseIndexes,
   selectTimelapsePulse,
   type TimelapseDataBundle
 } from "@/domain/timelapse/loader";
-import type { AllianceFlagSnapshot, AllianceScoresByDay } from "@/domain/timelapse/schema";
+import { loadScoreRuntime, type ScoreLoaderSnapshot } from "@/domain/timelapse/scoreLoader";
+import type { AllianceFlagSnapshot, AllianceScoresRuntime } from "@/domain/timelapse/schema";
 import { buildPulseSeries, countByAction, selectEvents, type PulsePoint } from "@/domain/timelapse/selectors";
 import {
   deserializeQueryState,
@@ -49,11 +49,13 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [workerScopedIndexes, setWorkerScopedIndexes] = useState<number[] | null>(null);
   const [workerPulse, setWorkerPulse] = useState<PulsePoint[] | null>(null);
-  const [allianceScoresByDay, setAllianceScoresByDay] = useState<AllianceScoresByDay | null>(null);
-  const [scoreLoadAttempted, setScoreLoadAttempted] = useState(false);
+  const [allianceScores, setAllianceScores] = useState<AllianceScoresRuntime | null>(null);
+  const [scoreLoadSnapshot, setScoreLoadSnapshot] = useState<ScoreLoaderSnapshot | null>(null);
+  const [scoreRetryNonce, setScoreRetryNonce] = useState(0);
   const urlSyncTimerRef = useRef<number | null>(null);
   const selectionRequestRef = useRef(0);
   const pulseRequestRef = useRef(0);
+  const scoreLoadRequestRef = useRef(0);
 
   const time = useFilterStore((state) => state.query.time);
   const playback = useFilterStore((state) => state.query.playback);
@@ -198,7 +200,7 @@ export function App() {
     [bundle]
   );
 
-  const scoreFileDeclared = Boolean(bundle?.manifest?.files?.["alliance_scores_daily.msgpack"]);
+  const scoreFileDeclared = Boolean(bundle?.manifest?.files?.["alliance_scores_v2.msgpack"]);
   const hasScoreRankData = useMemo(() => {
     if (!bundle?.allianceScoreRanksByDay) {
       return false;
@@ -213,7 +215,7 @@ export function App() {
 
     if (!scoreFileDeclared && hasScoreRankData) {
       console.warn(
-        "[timelapse] Score sizing disabled: manifest missing 'alliance_scores_daily.msgpack'. " +
+        "[timelapse] Score sizing disabled: manifest missing 'alliance_scores_v2.msgpack'. " +
           "Run 'npm run data:sync' after generating score artifacts."
       );
     }
@@ -224,39 +226,57 @@ export function App() {
       return;
     }
 
-    if (query.filters.sizeByScore && !scoreFileDeclared && allianceScoresByDay === null && !scoreLoadAttempted) {
-      console.warn(
-        "[timelapse] Ignoring 'sizeByScore=1' because manifest does not declare 'alliance_scores_daily.msgpack'."
-      );
-      setSizeByScore(false);
-      setScoreLoadAttempted(true);
+    setAllianceScores(null);
+    setScoreLoadSnapshot(null);
+    setScoreRetryNonce(0);
+  }, [bundle?.manifest?.datasetId]);
+
+  useEffect(() => {
+    if (!bundle?.manifest) {
       return;
     }
 
-    if (!query.filters.sizeByScore || allianceScoresByDay !== null || scoreLoadAttempted || !scoreFileDeclared) {
+    if (!scoreFileDeclared) {
       return;
     }
 
     let mounted = true;
-    setScoreLoadAttempted(true);
-    void loadAllianceScoresByDay().then((scores) => {
-      if (!mounted) {
-        return;
+    scoreLoadRequestRef.current += 1;
+    const nextRequestId = `${bundle.manifest.datasetId}:score:${scoreLoadRequestRef.current}:${scoreRetryNonce}`;
+
+    void loadScoreRuntime({
+      manifest: bundle.manifest,
+      requestId: nextRequestId,
+      forceNetwork: scoreRetryNonce > 0,
+      onEvent: (snapshot) => {
+        if (!mounted || snapshot.requestId !== nextRequestId) {
+          return;
+        }
+        setScoreLoadSnapshot(snapshot);
+        if (snapshot.runtime) {
+          setAllianceScores(snapshot.runtime);
+        }
       }
-      if (!scores) {
-        console.warn(
-          "[timelapse] Failed to load '/data/alliance_scores_daily.msgpack'. Score sizing has been disabled."
-        );
-        setSizeByScore(false);
-        return;
-      }
-      setAllianceScoresByDay(scores);
     });
 
     return () => {
       mounted = false;
     };
-  }, [allianceScoresByDay, bundle, query.filters.sizeByScore, scoreFileDeclared, scoreLoadAttempted, setSizeByScore]);
+  }, [bundle?.manifest, scoreFileDeclared, scoreRetryNonce]);
+
+  useEffect(() => {
+    if (!bundle) {
+      return;
+    }
+
+    if (query.filters.sizeByScore && !scoreFileDeclared) {
+      console.warn(
+        "[timelapse] Ignoring 'sizeByScore=1' because manifest does not declare 'alliance_scores_v2.msgpack'."
+      );
+      setSizeByScore(false);
+      return;
+    }
+  }, [bundle, query.filters.sizeByScore, scoreFileDeclared, setSizeByScore]);
 
   useEffect(() => {
     if (!bundle) {
@@ -383,14 +403,8 @@ export function App() {
     [bundle?.events, scopedSelectionIndexes, workerPulse]
   );
 
-  const hasScoreData = Boolean(
-    (allianceScoresByDay && Object.keys(allianceScoresByDay).length > 0) ||
-      (scoreFileDeclared && !scoreLoadAttempted)
-  );
-  const allianceScoreDays = useMemo(
-    () => (allianceScoresByDay ? Object.keys(allianceScoresByDay).sort((left, right) => left.localeCompare(right)) : []),
-    [allianceScoresByDay]
-  );
+  const hasScoreData = scoreFileDeclared;
+  const allianceScoreDays = useMemo(() => allianceScores?.dayKeys ?? [], [allianceScores]);
 
   const resolveAllianceFlagAtPlayhead = useMemo(
     () => (allianceId: number, playhead: string | null): AllianceFlagSnapshot | null => {
@@ -581,8 +595,11 @@ export function App() {
             sizeByScore={query.filters.sizeByScore}
             showFlags={showFlags}
             flagAssetsPayload={bundle.flagAssetsPayload}
-            allianceScoresByDay={allianceScoresByDay}
+            allianceScoresByDay={allianceScores?.byDay ?? null}
             allianceScoreDays={allianceScoreDays}
+            scoreLoadSnapshot={scoreLoadSnapshot}
+            scoreManifestDeclared={scoreFileDeclared}
+            onRetryScoreLoad={() => setScoreRetryNonce((current) => current + 1)}
             resolveAllianceFlagAtPlayhead={resolveAllianceFlagAtPlayhead}
             onFocusAlliance={(allianceId) => setFocus({ allianceId, edgeKey: null, eventId: null })}
             onFocusEdge={(edgeKey) => setFocus({ edgeKey, eventId: null })}

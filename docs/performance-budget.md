@@ -9,6 +9,8 @@ This project targets near-real-time interaction on modern desktop hardware with 
 - Filter typing feedback (input to visible list/network update): p95 <= 120ms.
 - Focus update (alliance or edge click to synchronized views): p95 <= 80ms.
 - Main thread long tasks: zero tasks >= 50ms during drag/play/filter interaction windows.
+- Score loader cache-hit readiness: `ready` <= 50ms after attempt start when cache identity matches.
+- Score loader cold path first usable state: <= 400ms to first `cache-hit` or `ready` on local dev data.
 
 ## Baseline Scenarios
 
@@ -18,6 +20,8 @@ Run each scenario for at least 10 seconds on the same dataset and browser build.
 2. Start playback at 4x for 10 seconds.
 3. Type 10-20 characters into search filter at natural speed.
 4. Click multiple alliance nodes/edges to move focus context.
+5. Reload with warm cache and verify score status reaches `ready` in <= 50ms.
+6. Clear score cache (or bump manifest hash) and verify first usable score state in <= 400ms.
 
 ## Instrumentation
 
@@ -50,7 +54,17 @@ Key metrics currently tracked:
 - `playhead.input`
 - `range.input`
 - `url.replaceState`
+- `window.__timelapsePerf.scoreLoads` ring buffer entries for score attempts
 
 ## Acceptance Gate
 
 Do not proceed to deeper architecture migrations unless the baseline report is captured and checked against the budgets above.
+
+## Hard Verification Gates
+
+- Score artifact size: `public/data/alliance_scores_v2.msgpack` must be <= 10 MiB.
+- Score decode contract: runtime loader must parse only schema version `2` for score payloads.
+- Score toggle lifecycle: `sizeByScore` must support failure -> retry -> success without requiring app reload.
+- Toggle-to-render latency: p95 <= 200ms from enabling score sizing to first `network.graph.build` with `scoreSizingActive=true`.
+- Graph build stability: `network.graph.build` p95 must remain <= 80ms during score sizing runs.
+- Score loader diagnostics: each attempt must finish in `ready` or `error-*` (no silent indefinite loading).

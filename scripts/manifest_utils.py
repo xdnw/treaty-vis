@@ -17,11 +17,10 @@ WEB_MANIFEST_REQUIRED_FILES = [
 	"flag_atlas.webp",
 	"flag_atlas.png",
 	"alliance_score_ranks_daily.msgpack",
+	"alliance_scores_v2.msgpack",
 ]
 
-WEB_MANIFEST_OPTIONAL_FILES = [
-	"alliance_scores_daily.msgpack",
-]
+WEB_MANIFEST_OPTIONAL_FILES: list[str] = []
 
 
 def _sha256_file(path: Path) -> str:

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-25T03:50:48.311Z",
+  "generatedAt": "2026-02-25T04:39:17.374118Z",
   "files": {
     "treaty_changes_reconciled.msgpack": {
       "sizeBytes": 10216509,
@@ -31,12 +31,12 @@
     },
     "alliance_score_ranks_daily.msgpack": {
       "sizeBytes": 7860840,
-      "sha256": "4ce7e315eb00985d254ec584967ef0042bc9b1af8c646127a8f637e5c02e5bfc"
+      "sha256": "a2fc2c15d3934dd58a87078cf07eb6982719fc1a0511c4d68ff2c4f94f58aa42"
     },
-    "alliance_scores_daily.msgpack": {
-      "sizeBytes": 14699331,
-      "sha256": "d0f51bf6e8bf2d7e8798426ec2e278a3b983e118d164e05d87d05ebe35e7a160"
+    "alliance_scores_v2.msgpack": {
+      "sizeBytes": 7195875,
+      "sha256": "56747c704346bb8450263e55c8961c88f93bba1e3023fffb13705ac7538684a8"
     }
   },
-  "datasetId": "45d5be253319db8f"
+  "datasetId": "a5a57efa4c5e12ce"
 }

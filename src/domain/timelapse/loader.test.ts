@@ -1,6 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveAllianceFlagSnapshot } from "@/domain/timelapse/loader";
 import type { AllianceFlagTimelineByAlliance } from "@/domain/timelapse/schema";
+
+const originalFetch = globalThis.fetch;
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 function buildTimelines(): AllianceFlagTimelineByAlliance {
   return {

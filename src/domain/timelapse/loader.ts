@@ -1,7 +1,6 @@
 import {
   allianceFlagsPayloadSchema,
   allianceScoreRanksDailySchema,
-  allianceScoresDailySchema,
   flagAssetsPayloadSchema,
   flagSchema,
   manifestSchema,
@@ -11,7 +10,6 @@ import {
   type AllianceFlagTimelineByAlliance,
   type AllianceFlagsPayload,
   type AllianceScoreRanksByDay,
-  type AllianceScoresByDay,
   type FlagAssetsPayload,
   type TimelapseEvent,
   type TimelapseFlag,
@@ -82,7 +80,6 @@ let selectionRequestId = 0;
 let pulseRequestId = 0;
 let networkRequestId = 0;
 let workerInstance: Worker | null = null;
-let allianceScoresPromise: Promise<AllianceScoresByDay | null> | null = null;
 let optionalFlagManifestWarningShown = false;
 const pendingSelectionRequests = new Map<number, PendingSelectRequest>();
 const pendingPulseRequests = new Map<number, PendingPulseRequest>();
@@ -878,27 +875,4 @@ export function loadTimelapseBundle(options?: TimelapseLoadOptions): Promise<Tim
   return nextPromise;
 }
 
-export function loadAllianceScoresByDay(): Promise<AllianceScoresByDay | null> {
-  if (allianceScoresPromise) {
-    return allianceScoresPromise;
-  }
-
-  allianceScoresPromise = fetch("/data/alliance_scores_daily.msgpack")
-    .then(async (response) => {
-      if (!response.ok) {
-        return null;
-      }
-      const body = await response.arrayBuffer();
-      const decoded = decode(new Uint8Array(body)) as unknown;
-      const parsed = allianceScoresDailySchema.safeParse(decoded);
-      if (!parsed.success) {
-        console.warn("Ignoring invalid optional alliance score dataset", parsed.error.message);
-        return null;
-      }
-      return parsed.data.scores_by_day;
-    })
-    .catch(() => null);
-
-  return allianceScoresPromise;
-}
 

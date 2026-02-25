@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Graph from "graphology";
 import Sigma from "sigma";
+import type { ScoreLoaderSnapshot } from "@/domain/timelapse/scoreLoader";
 import type { AllianceFlagSnapshot, AllianceScoresByDay, FlagAssetsPayload, TimelapseEvent } from "@/domain/timelapse/schema";
 import { selectTimelapseNetworkEventIndexes } from "@/domain/timelapse/loader";
-import { resolveScoreDay } from "@/domain/timelapse/scoreDay";
+import { resolveScoreRowForPlayhead } from "@/domain/timelapse/scoreDay";
 import { deriveNetworkEdges } from "@/domain/timelapse/selectors";
 import { type QueryState, useFilterStore } from "@/features/filters/filterStore";
 import { dampPosition, positionForNode, type Point } from "@/features/network/layout";
@@ -120,6 +121,9 @@ type Props = {
   flagAssetsPayload: FlagAssetsPayload | null;
   allianceScoresByDay: AllianceScoresByDay | null;
   allianceScoreDays: string[];
+  scoreLoadSnapshot: ScoreLoaderSnapshot | null;
+  scoreManifestDeclared: boolean;
+  onRetryScoreLoad: () => void;
   resolveAllianceFlagAtPlayhead: (allianceId: number, playhead: string | null) => AllianceFlagSnapshot | null;
   onFocusAlliance: (allianceId: number | null) => void;
   onFocusEdge: (edgeKey: string | null) => void;
@@ -158,12 +162,52 @@ function degreeRadius(degree: number): number {
   return clampRadius(3 + Math.log2(degree + 1) * 1.2);
 }
 
-function scoreRadius(score: number, maxScore: number): number {
-  if (score <= 0 || maxScore <= 0) {
+function scoreRadius(score: number, minScore: number, maxScore: number): number {
+  if (score <= 0 || minScore <= 0 || maxScore <= 0) {
     return MIN_NODE_RADIUS;
   }
-  const normalized = Math.sqrt(score / maxScore);
+
+  if (maxScore - minScore <= Number.EPSILON) {
+    return MAX_NODE_RADIUS;
+  }
+
+  const safeScore = Math.max(score, minScore);
+  const range = Math.log(maxScore) - Math.log(minScore);
+  if (!Number.isFinite(range) || range <= 0) {
+    return MAX_NODE_RADIUS;
+  }
+  const normalized = (Math.log(safeScore) - Math.log(minScore)) / range;
   return clampRadius(MIN_NODE_RADIUS + normalized * (MAX_NODE_RADIUS - MIN_NODE_RADIUS));
+}
+
+function resolveAllianceScoreWithFallback(
+  allianceId: string,
+  scoreByDay: Record<string, Record<string, number>>,
+  scoreDays: string[],
+  startDay: string | null
+): number | null {
+  if (!startDay) {
+    return null;
+  }
+
+  const startIndex = scoreDays.indexOf(startDay);
+  if (startIndex < 0) {
+    return null;
+  }
+
+  for (let index = startIndex; index >= 0; index -= 1) {
+    const day = scoreDays[index];
+    const row = scoreByDay[day];
+    if (!row) {
+      continue;
+    }
+    const score = row[allianceId];
+    if (typeof score === "number" && Number.isFinite(score) && score > 0) {
+      return score;
+    }
+  }
+
+  return null;
 }
 
 function deriveZoomBand(cameraRatio: number): ZoomBand {
@@ -304,6 +348,9 @@ export function NetworkView({
   flagAssetsPayload,
   allianceScoresByDay,
   allianceScoreDays,
+  scoreLoadSnapshot,
+  scoreManifestDeclared,
+  onRetryScoreLoad,
   resolveAllianceFlagAtPlayhead,
   onFocusAlliance,
   onFocusEdge
@@ -595,24 +642,33 @@ export function NetworkView({
       nodeIds.length,
       framePressureLevel
     );
-    const scoreDay = sizeByScore ? resolveScoreDay(allianceScoreDays, playhead) : null;
-    const dayScores = scoreDay && allianceScoresByDay ? allianceScoresByDay[scoreDay] ?? null : null;
+    const scoreResolution =
+      sizeByScore && allianceScoresByDay
+        ? resolveScoreRowForPlayhead(allianceScoresByDay, allianceScoreDays, playhead)
+        : { day: null, row: null, usedFallback: false };
+    const scoreDay = scoreResolution.day;
+    const dayScores = scoreResolution.row;
 
     const scoreByNode = new Map<string, number>();
+    let minVisibleScore = Number.POSITIVE_INFINITY;
     let maxVisibleScore = 0;
-    if (dayScores) {
+    if (allianceScoresByDay && dayScores) {
       for (const nodeId of nodeIds) {
-        const score = dayScores[nodeId];
+        const score = resolveAllianceScoreWithFallback(nodeId, allianceScoresByDay, allianceScoreDays, scoreDay);
         if (typeof score !== "number" || !Number.isFinite(score) || score <= 0) {
           continue;
         }
         scoreByNode.set(nodeId, score);
+        if (score < minVisibleScore) {
+          minVisibleScore = score;
+        }
         if (score > maxVisibleScore) {
           maxVisibleScore = score;
         }
       }
     }
-    const useScoreSizing = Boolean(sizeByScore && dayScores && maxVisibleScore > 0);
+    const useScoreSizing = Boolean(sizeByScore && dayScores && scoreByNode.size > 0 && maxVisibleScore > 0);
+    const normalizedMinScore = Number.isFinite(minVisibleScore) ? minVisibleScore : 0;
 
     const flagImportanceByNodeId = new Map<string, number>();
     for (const nodeId of nodeIds) {
@@ -650,7 +706,10 @@ export function NetworkView({
       nextPositions.set(id, pos);
       const highlighted = focusedAlliance !== null && focusedAlliance === id;
       const nodeScore = scoreByNode.get(id) ?? null;
-      const baseRadius = useScoreSizing && nodeScore !== null ? scoreRadius(nodeScore, maxVisibleScore) : degreeRadius(meta.degree);
+      const baseRadius =
+        useScoreSizing && nodeScore !== null
+          ? scoreRadius(nodeScore, normalizedMinScore, maxVisibleScore)
+          : degreeRadius(meta.degree);
       const counterparties = nodeCounterparties.get(id);
       const activeTreaties = counterparties
         ? [...counterparties.entries()]
@@ -742,6 +801,10 @@ export function NetworkView({
       spriteNodeIds: nodes.filter((node) => node.flagSprite !== null).map((node) => node.id),
       unmappedTreatyTypes: [...unmappedTreatyTypes].sort((left, right) => left.localeCompare(right)),
       scoreSizingActive: useScoreSizing,
+      scoreSizedNodeCount: scoreByNode.size,
+      scoreMin: normalizedMinScore,
+      scoreMax: maxVisibleScore,
+      usedDayFallback: scoreResolution.usedFallback,
       scoreDay,
       graphBuildMs
     };
@@ -1119,6 +1182,42 @@ export function NetworkView({
     return `Focused Alliance: ${node.fullLabel} | Treaties: ${node.treatyCount} | Counterparties: ${node.counterparties}`;
   }, [focusedAllianceId, graph.nodes]);
 
+  const scoreStatusRows = useMemo(() => {
+    const dayCount = allianceScoreDays.length;
+    const dataDayCount = allianceScoresByDay ? Object.keys(allianceScoresByDay).length : 0;
+    const stage = scoreLoadSnapshot?.state ?? "idle";
+    const elapsedMs = scoreLoadSnapshot ? Math.round(scoreLoadSnapshot.elapsedMs) : 0;
+    const httpStatus = scoreLoadSnapshot?.httpStatus ?? null;
+    const bytesFetched = scoreLoadSnapshot?.bytesFetched ?? 0;
+    const decodeMs = scoreLoadSnapshot?.decodeMs ?? null;
+    const scoredNodes = scoreLoadSnapshot?.scoredNodeCount ?? graph.scoreSizedNodeCount ?? 0;
+
+    return [
+      { label: "Stage", value: stage },
+      { label: "Elapsed", value: `${elapsedMs}ms` },
+      { label: "HTTP", value: httpStatus === null ? "n/a" : String(httpStatus) },
+      { label: "Bytes", value: bytesFetched > 0 ? bytesFetched.toLocaleString() : "0" },
+      { label: "Decode", value: decodeMs === null ? "n/a" : `${Math.round(decodeMs)}ms` },
+      { label: "Day count", value: String(Math.max(dayCount, dataDayCount)) },
+      { label: "Scored nodes", value: String(scoredNodes) }
+    ];
+  }, [
+    allianceScoreDays.length,
+    allianceScoresByDay,
+    graph.scoreSizedNodeCount,
+    scoreLoadSnapshot
+  ]);
+
+  const scoreErrorText = useMemo(() => {
+    if (!scoreLoadSnapshot) {
+      return null;
+    }
+    if (!scoreLoadSnapshot.state.startsWith("error-")) {
+      return null;
+    }
+    return scoreLoadSnapshot.message ?? scoreLoadSnapshot.reasonCode ?? "Score loader failed";
+  }, [scoreLoadSnapshot]);
+
   return (
     <section className="panel p-4">
       <header className="mb-2 flex items-center justify-between">
@@ -1170,6 +1269,33 @@ export function NetworkView({
       </div>
       <div className="mb-2 text-xs text-muted">
         {graph.nodes.length} alliances shown | {graph.renderedEdges} treaties shown | Node size by {graph.scoreSizingActive ? "score" : "connections"}
+        {graph.scoreSizingActive
+          ? ` | scored ${graph.scoreSizedNodeCount}/${graph.nodes.length} (${graph.scoreDay ?? "n/a"})`
+          : ""}
+      </div>
+      <div className="mb-2 rounded border border-slate-300 bg-slate-50 px-2 py-2 text-[11px] text-slate-800">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {scoreStatusRows.map((row) => (
+            <span key={row.label}>
+              <span className="text-slate-500">{row.label}:</span> {row.value}
+            </span>
+          ))}
+        </div>
+        {!scoreManifestDeclared ? (
+          <div className="mt-1 text-amber-800">Manifest does not declare score dataset.</div>
+        ) : null}
+        {scoreErrorText ? <div className="mt-1 text-rose-700">{scoreErrorText}</div> : null}
+        <div className="mt-2">
+          <button
+            type="button"
+            className="rounded border border-slate-300 px-2 py-0.5 text-[11px] hover:bg-slate-100"
+            onClick={onRetryScoreLoad}
+            disabled={!scoreManifestDeclared}
+            title={scoreManifestDeclared ? "Retry score load" : "Score artifact not declared in manifest"}
+          >
+            Retry score load
+          </button>
+        </div>
       </div>
       <div ref={hostRef} className="h-[350px] overflow-hidden rounded-xl border border-slate-200" />
       {hoveredAlliance ? (

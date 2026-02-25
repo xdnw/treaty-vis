@@ -9,6 +9,24 @@ type PerfCollector = {
   mark: (name: string, durationMs: number) => void;
   reset: () => void;
   report: () => Record<string, { count: number; avgMs: number; maxMs: number }>;
+  scoreLoads: ScoreLoadAttemptTelemetry[];
+};
+
+export type ScoreLoadAttemptTelemetry = {
+  requestId: string;
+  datasetId: string;
+  state: "ready" | "error-timeout" | "error-http" | "error-decode" | "error-abort";
+  elapsedMs: number;
+  httpStatus: number | null;
+  bytesFetched: number;
+  totalBytes: number | null;
+  decodeMs: number | null;
+  dayCount: number;
+  scoredNodeCount: number;
+  reasonCode: string | null;
+  message: string | null;
+  fromCache: boolean;
+  at: string;
 };
 
 type PerfWindow = Window & {
@@ -43,6 +61,7 @@ function buildCollector(): PerfCollector {
 
   const reset = () => {
     stats.clear();
+    collector.scoreLoads.splice(0, collector.scoreLoads.length);
   };
 
   const report = () => {
@@ -57,12 +76,15 @@ function buildCollector(): PerfCollector {
     return result;
   };
 
-  return {
+  const collector: PerfCollector = {
     enabled,
     mark,
     reset,
-    report
+    report,
+    scoreLoads: []
   };
+
+  return collector;
 }
 
 export function initTimelapsePerfCollector(): PerfCollector {
@@ -71,7 +93,8 @@ export function initTimelapsePerfCollector(): PerfCollector {
       enabled: false,
       mark: () => {},
       reset: () => {},
-      report: () => ({})
+      report: () => ({}),
+      scoreLoads: []
     };
   }
 
@@ -85,6 +108,22 @@ export function initTimelapsePerfCollector(): PerfCollector {
 
 export function markTimelapsePerf(name: string, durationMs: number): void {
   initTimelapsePerfCollector().mark(name, durationMs);
+}
+
+export function pushScoreLoadAttempt(attempt: Omit<ScoreLoadAttemptTelemetry, "at">): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const collector = initTimelapsePerfCollector();
+  const withTimestamp: ScoreLoadAttemptTelemetry = {
+    ...attempt,
+    at: new Date().toISOString()
+  };
+  collector.scoreLoads.push(withTimestamp);
+  if (collector.scoreLoads.length > 20) {
+    collector.scoreLoads.splice(0, collector.scoreLoads.length - 20);
+  }
 }
 
 declare global {

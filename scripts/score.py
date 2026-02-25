@@ -21,10 +21,15 @@ SCORE_KEYS = ("score", "alliance_score", "alliancescore", "total_score", "totals
 EXPECTED_ID_KEYS = {"id", "allianceid"}
 EXPECTED_SCORE_KEYS = {"score", "alliancescore", "totalscore"}
 
+SCORE_SCHEMA_VERSION = 2
+RANK_SCHEMA_VERSION = 2
+DEFAULT_QUANTIZATION_SCALE = 1000
+DEFAULT_MAX_SCORE_BYTES = 10 * 1024 * 1024
+
 
 def parse_args() -> argparse.Namespace:
 	parser = argparse.ArgumentParser(
-		description="Generate day -> alliance -> score index from daily alliance CSV archives."
+		description="Generate compact v2 alliance score and rank artifacts from daily alliance CSV archives."
 	)
 	parser.add_argument(
 		"--alliances-dir",
@@ -33,13 +38,13 @@ def parse_args() -> argparse.Namespace:
 	)
 	parser.add_argument(
 		"--output-scores",
-		default=str(WEB_PUBLIC_DATA_DIR / "alliance_scores_daily.msgpack"),
-		help="Output MessagePack path for full day -> alliance -> score payload",
+		default=str(WEB_PUBLIC_DATA_DIR / "alliance_scores_v2.msgpack"),
+		help="Output MessagePack path for compact v2 score payload",
 	)
 	parser.add_argument(
 		"--output-ranks",
 		default=str(WEB_PUBLIC_DATA_DIR / "alliance_score_ranks_daily.msgpack"),
-		help="Output MessagePack path for compact day -> alliance -> strict rank payload",
+		help="Output MessagePack path for day -> alliance -> rank payload",
 	)
 	parser.add_argument(
 		"--output",
@@ -55,6 +60,18 @@ def parse_args() -> argparse.Namespace:
 		"--download-missing-alliance-archives",
 		action="store_true",
 		help="Download missing alliances-YYYY-MM-DD.csv.zip files before processing",
+	)
+	parser.add_argument(
+		"--quantization-scale",
+		type=int,
+		default=DEFAULT_QUANTIZATION_SCALE,
+		help="Score quantization scale (stored_value = round(score * scale))",
+	)
+	parser.add_argument(
+		"--max-score-bytes",
+		type=int,
+		default=DEFAULT_MAX_SCORE_BYTES,
+		help="Fail if v2 score artifact exceeds this many bytes",
 	)
 	parser.add_argument(
 		"--pretty",
@@ -116,6 +133,10 @@ def round_score(value: float) -> float:
 	return round(value, 6)
 
 
+def quantize_score(value: float, scale: int) -> int:
+	return max(0, int(round(value * scale)))
+
+
 def read_csv_header_keys(archive: zipfile.ZipFile, csv_name: str) -> set[str]:
 	with archive.open(csv_name, "r") as zip_stream:
 		text_stream = io.TextIOWrapper(zip_stream, encoding="utf-8", newline="")
@@ -165,15 +186,19 @@ def load_day_scores(path: Path) -> tuple[dict[int, float], int, int]:
 					if alliance_id is None or score is None:
 						rows_skipped += 1
 						continue
-					# If duplicates are present in a source file, keep last seen row deterministically.
+					# Keep last-seen duplicate rows deterministically.
 					day_scores[alliance_id] = round_score(score)
 				return day_scores, rows_seen, rows_skipped
 	except Exception as exc:
 		raise ValueError(str(exc)) from exc
 
 
-def build_scores_payload(files: list[Path]) -> tuple[dict[str, dict[str, float]], list[str], int, int, int]:
-	scores_by_day: dict[str, dict[str, float]] = {}
+def build_score_and_rank_payloads(
+	files: list[Path],
+	quantization_scale: int,
+) -> tuple[dict[str, Any], dict[str, Any], list[str], int, int, int]:
+	score_rows_by_day: dict[str, list[list[int]]] = {}
+	ranks_by_day: dict[str, dict[str, int]] = {}
 	skipped: list[str] = []
 	records_written = 0
 	rows_seen_total = 0
@@ -199,35 +224,51 @@ def build_scores_payload(files: list[Path]) -> tuple[dict[str, dict[str, float]]
 		rows_seen_total += rows_seen
 		rows_skipped_total += rows_skipped
 
-		ordered_day_scores: dict[str, float] = {}
-		for alliance_id in sorted(day_scores.keys()):
-			ordered_day_scores[str(alliance_id)] = day_scores[alliance_id]
+		ordered_ids = sorted(day_scores.keys())
+		ranked = sorted(ordered_ids, key=lambda alliance_id: (-day_scores[alliance_id], alliance_id))
+		day_ranks: dict[str, int] = {}
+		for rank, alliance_id in enumerate(ranked, start=1):
+			day_ranks[str(alliance_id)] = rank
+		ranks_by_day[day] = day_ranks
 
-		scores_by_day[day] = ordered_day_scores
-		records_written += len(ordered_day_scores)
+		quantized_row: list[list[int]] = []
+		for alliance_id in ordered_ids:
+			quantized = quantize_score(day_scores[alliance_id], quantization_scale)
+			if quantized <= 0:
+				continue
+			quantized_row.append([alliance_id, quantized])
+
+		if quantized_row:
+			score_rows_by_day[day] = quantized_row
+			records_written += len(quantized_row)
+
 		progress.step(records=records_written, skipped=len(skipped), done=index == total_files)
 		print(
-			f"[score] parsed {path.name}: rows={rows_seen}, skipped={rows_skipped}, kept={len(ordered_day_scores)}",
+			f"[score] parsed {path.name}: rows={rows_seen}, skipped={rows_skipped}, kept={len(quantized_row)}",
 			file=sys.stderr,
 		)
 
-	ordered_days = dict(sorted(scores_by_day.items(), key=lambda item: item[0]))
-	return ordered_days, skipped, records_written, rows_seen_total, rows_skipped_total
-
-
-def build_ranks_payload(scores_by_day: dict[str, dict[str, float]]) -> dict[str, dict[str, int]]:
-	ranks_by_day: dict[str, dict[str, int]] = {}
-	for day, day_scores in scores_by_day.items():
-		ranked = sorted(day_scores.items(), key=lambda item: (-item[1], int(item[0])))
-		day_ranks: dict[str, int] = {}
-		for index, (alliance_id, _) in enumerate(ranked, start=1):
-			day_ranks[alliance_id] = index
-		ranks_by_day[day] = day_ranks
-	return ranks_by_day
+	sorted_days = sorted(score_rows_by_day.keys())
+	score_payload = {
+		"schema_version": SCORE_SCHEMA_VERSION,
+		"quantization_scale": quantization_scale,
+		"day_keys": sorted_days,
+		"days": [score_rows_by_day[day] for day in sorted_days],
+	}
+	ranks_payload = {
+		"schema_version": RANK_SCHEMA_VERSION,
+		"ranks_by_day": dict(sorted(ranks_by_day.items(), key=lambda item: item[0])),
+	}
+	return score_payload, ranks_payload, skipped, records_written, rows_seen_total, rows_skipped_total
 
 
 def main() -> int:
 	args = parse_args()
+	if args.quantization_scale <= 0:
+		raise ValueError("--quantization-scale must be > 0")
+	if args.max_score_bytes <= 0:
+		raise ValueError("--max-score-bytes must be > 0")
+
 	alliances_dir = Path(args.alliances_dir).resolve()
 	output_scores = Path(args.output_scores).resolve()
 	if args.output:
@@ -246,19 +287,26 @@ def main() -> int:
 		else:
 			print(f"[score] info: {json.dumps(flag, ensure_ascii=True)}", file=sys.stderr)
 
-	scores_by_day, skipped_files, records_written, rows_seen_total, rows_skipped_total = build_scores_payload(files)
-	ranks_by_day = build_ranks_payload(scores_by_day)
-	scores_payload = {"schema_version": 1, "scores_by_day": scores_by_day}
-	ranks_payload = {"schema_version": 1, "ranks_by_day": ranks_by_day}
+	scores_payload, ranks_payload, skipped_files, records_written, rows_seen_total, rows_skipped_total = (
+		build_score_and_rank_payloads(files, args.quantization_scale)
+	)
+
+	scores_bytes = msgpack.packb(scores_payload, use_bin_type=True)
+	if len(scores_bytes) > args.max_score_bytes:
+		raise ValueError(
+			f"Score artifact too large: {len(scores_bytes)} bytes > max {args.max_score_bytes} bytes. "
+			"Tune quantization or prune source coverage."
+		)
+	ranks_bytes = msgpack.packb(ranks_payload, use_bin_type=True)
 
 	output_scores.parent.mkdir(parents=True, exist_ok=True)
-	output_scores.write_bytes(msgpack.packb(scores_payload, use_bin_type=True))
+	output_scores.write_bytes(scores_bytes)
 	output_ranks.parent.mkdir(parents=True, exist_ok=True)
-	output_ranks.write_bytes(msgpack.packb(ranks_payload, use_bin_type=True))
+	output_ranks.write_bytes(ranks_bytes)
 
 	print(
-		f"[score] wrote scores={output_scores} and ranks={output_ranks} "
-		f"({len(scores_by_day)} days, {records_written} records, {len(skipped_files)} skipped files, "
+		f"[score] wrote scores={output_scores} ({len(scores_bytes)} bytes) and ranks={output_ranks} ({len(ranks_bytes)} bytes) "
+		f"({len(scores_payload['day_keys'])} days, {records_written} records, {len(skipped_files)} skipped files, "
 		f"{rows_seen_total} rows parsed, {rows_skipped_total} rows skipped)"
 	)
 	if skipped_files:

@@ -204,11 +204,15 @@ function normalizeScoreRanksByDay(raw: unknown | null): WorkerScoreRanksByDay | 
     return null;
   }
 
-  const candidate = raw as { ranks_by_day?: unknown };
-  const source =
-    candidate.ranks_by_day && typeof candidate.ranks_by_day === "object"
-      ? (candidate.ranks_by_day as Record<string, unknown>)
-      : (raw as Record<string, unknown>);
+  const candidate = raw as { schema_version?: unknown; ranks_by_day?: unknown };
+  if (Number(candidate.schema_version) !== 2) {
+    return null;
+  }
+  if (!candidate.ranks_by_day || typeof candidate.ranks_by_day !== "object") {
+    return null;
+  }
+
+  const source = candidate.ranks_by_day as Record<string, unknown>;
 
   const normalized: WorkerScoreRanksByDay = {};
   for (const [day, rowRaw] of Object.entries(source)) {
