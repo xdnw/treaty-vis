@@ -16,7 +16,10 @@ import {
   useFilterStore
 } from "@/features/filters/filterStore";
 import { FilterBar } from "@/features/filters/FilterBar";
+import { PlaybackControls } from "@/features/filters/PlaybackControls";
 import { InspectorView } from "@/features/inspector/InspectorView";
+import { NetworkAllianceHint, type NetworkAllianceHintData } from "@/features/network/NetworkAllianceHint";
+import { shouldExitNetworkFullscreenOnEscape } from "@/features/network/networkViewPolicy";
 import { formatNumber } from "@/lib/format";
 
 const TimelineView = lazy(() => import("@/features/timeline/TimelineView").then((module) => ({ default: module.TimelineView })));
@@ -52,6 +55,7 @@ export function App() {
   const [allianceScores, setAllianceScores] = useState<AllianceScoresRuntime | null>(null);
   const [scoreLoadSnapshot, setScoreLoadSnapshot] = useState<ScoreLoaderSnapshot | null>(null);
   const [scoreRetryNonce, setScoreRetryNonce] = useState(0);
+  const [networkFullscreenHint, setNetworkFullscreenHint] = useState<NetworkAllianceHintData | null>(null);
   const urlSyncTimerRef = useRef<number | null>(null);
   const selectionRequestRef = useRef(0);
   const pulseRequestRef = useRef(0);
@@ -72,6 +76,8 @@ export function App() {
   const setFocus = useFilterStore((state) => state.setFocus);
   const clearFocus = useFilterStore((state) => state.clearFocus);
   const resetAll = useFilterStore((state) => state.resetAll);
+  const isNetworkFullscreen = useFilterStore((state) => state.isNetworkFullscreen);
+  const setNetworkFullscreen = useFilterStore((state) => state.setNetworkFullscreen);
 
   const query = useMemo<QueryState>(
     () => ({
@@ -88,6 +94,32 @@ export function App() {
   useEffect(() => {
     setStateFromUrl(deserializeQueryState(window.location.search));
   }, [setStateFromUrl]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!shouldExitNetworkFullscreenOnEscape(event.key, isNetworkFullscreen)) {
+        return;
+      }
+      event.preventDefault();
+      setNetworkFullscreen(false);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isNetworkFullscreen, setNetworkFullscreen]);
+
+  useEffect(() => {
+    if (!isNetworkFullscreen) {
+      setNetworkFullscreenHint(null);
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isNetworkFullscreen]);
 
   useEffect(() => {
     let mounted = true;
@@ -493,126 +525,186 @@ export function App() {
   }
 
   return (
-    <main className="mx-auto max-w-7xl space-y-4 p-5 lg:p-8">
-      <section className="panel overflow-hidden p-5">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h1 className="text-3xl">Treaty Explorer</h1>
-            <p className="text-sm text-muted">
-              Explore treaty history with synchronized timeline, network, and event-level inspection.
-            </p>
-          </div>
-          <div className="text-xs text-muted">
-            Dataset: {bundle.manifest?.datasetId ?? "unversioned"} | Generated: {bundle.summary.generated_at}
+    <>
+      {!isNetworkFullscreen ? (
+        <main className="mx-auto max-w-7xl space-y-4 p-5 lg:p-8">
+          <section className="panel overflow-hidden p-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h1 className="text-3xl">Treaty Explorer</h1>
+                <p className="text-sm text-muted">
+                  Explore treaty history with synchronized timeline, network, and event-level inspection.
+                </p>
+              </div>
+              <div className="text-xs text-muted">
+                Dataset: {bundle.manifest?.datasetId ?? "unversioned"} | Generated: {bundle.summary.generated_at}
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+                onClick={handleExportCsv}
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+                onClick={handleExportJson}
+              >
+                Export JSON Context
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+                onClick={() => {
+                  void handleShare();
+                }}
+              >
+                Copy Share Link
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
+                onClick={resetAll}
+              >
+                Reset All State
+              </button>
+              <div className="text-xs text-muted">
+                Focus: Alliance {query.focus.allianceId ?? "none"} | Edge {query.focus.edgeKey ?? "none"}
+              </div>
+              <button
+                type="button"
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={clearFocus}
+                disabled={query.focus.allianceId === null && query.focus.edgeKey === null}
+              >
+                Clear Focus
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <MetricCard label="Scoped Events" value={formatNumber(scopedEvents.length)} />
+              <MetricCard label="Signed" value={formatNumber(countsByAction.signed ?? 0)} />
+              <MetricCard
+                label="Terminal"
+                value={formatNumber(
+                  (countsByAction.cancelled ?? 0) +
+                    (countsByAction.expired ?? 0) +
+                    (countsByAction.ended ?? 0) +
+                    (countsByAction.inferred_cancelled ?? 0)
+                )}
+              />
+              <MetricCard label="Flags" value={formatNumber(bundle.flags.length)} />
+            </div>
+          </section>
+
+          <FilterBar
+            indices={bundle.indices}
+            timelineTicks={timelineTicks}
+            hasScoreData={hasScoreData}
+            hasScoreRankData={hasScoreRankData}
+          />
+
+          <section className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
+            <Suspense fallback={<section className="panel p-4 text-sm text-muted">Loading timeline view...</section>}>
+              <TimelineView
+                pulse={pulse}
+                playhead={query.playback.playhead}
+                timeRange={query.time}
+                onSetPlayhead={handleSetPlayhead}
+                onSetRange={handleSetRange}
+              />
+            </Suspense>
+            <Suspense fallback={<section className="panel p-4 text-sm text-muted">Loading network view...</section>}>
+              <NetworkView
+                allEvents={bundle.events}
+                scopedIndexes={scopedSelectionIndexes}
+                baseQuery={baseQuery}
+                playhead={query.playback.playhead}
+                focusedAllianceId={query.focus.allianceId}
+                focusedEdgeKey={query.focus.edgeKey}
+                sizeByScore={query.filters.sizeByScore}
+                showFlags={showFlags}
+                flagAssetsPayload={bundle.flagAssetsPayload}
+                allianceScoresByDay={allianceScores?.byDay ?? null}
+                allianceScoreDays={allianceScoreDays}
+                scoreLoadSnapshot={scoreLoadSnapshot}
+                scoreManifestDeclared={scoreFileDeclared}
+                onRetryScoreLoad={() => setScoreRetryNonce((current) => current + 1)}
+                resolveAllianceFlagAtPlayhead={resolveAllianceFlagAtPlayhead}
+                onFocusAlliance={(allianceId) => setFocus({ allianceId, edgeKey: null, eventId: null })}
+                onFocusEdge={(edgeKey) => setFocus({ edgeKey, eventId: null })}
+                isFullscreen={false}
+                onEnterFullscreen={() => setNetworkFullscreen(true)}
+                onExitFullscreen={() => setNetworkFullscreen(false)}
+                forceFullscreenLabels={false}
+                isPlaying={query.playback.isPlaying}
+                onFullscreenHintChange={undefined}
+              />
+            </Suspense>
+          </section>
+
+          <InspectorView
+            events={scopedEvents}
+            onSelectPlayhead={handleSetPlayhead}
+            onFocusAlliance={(allianceId) => setFocus({ allianceId, edgeKey: null })}
+          />
+        </main>
+      ) : null}
+
+      {isNetworkFullscreen ? (
+        <div className="fixed inset-0 z-50 bg-white p-2 md:p-3">
+          <div className="grid h-full min-h-0 grid-rows-[1fr_auto] gap-2 md:grid-cols-[1fr_340px] md:grid-rows-1 md:gap-3">
+            <div className="min-h-0 md:row-span-1">
+              <Suspense fallback={<section className="panel h-full p-4 text-sm text-muted">Loading network view...</section>}>
+                <NetworkView
+                  allEvents={bundle.events}
+                  scopedIndexes={scopedSelectionIndexes}
+                  baseQuery={baseQuery}
+                  playhead={query.playback.playhead}
+                  focusedAllianceId={query.focus.allianceId}
+                  focusedEdgeKey={query.focus.edgeKey}
+                  sizeByScore={query.filters.sizeByScore}
+                  showFlags={showFlags}
+                  flagAssetsPayload={bundle.flagAssetsPayload}
+                  allianceScoresByDay={allianceScores?.byDay ?? null}
+                  allianceScoreDays={allianceScoreDays}
+                  scoreLoadSnapshot={scoreLoadSnapshot}
+                  scoreManifestDeclared={scoreFileDeclared}
+                  onRetryScoreLoad={() => setScoreRetryNonce((current) => current + 1)}
+                  resolveAllianceFlagAtPlayhead={resolveAllianceFlagAtPlayhead}
+                  onFocusAlliance={(allianceId) => setFocus({ allianceId, edgeKey: null, eventId: null })}
+                  onFocusEdge={(edgeKey) => setFocus({ edgeKey, eventId: null })}
+                  isFullscreen
+                  onEnterFullscreen={() => setNetworkFullscreen(true)}
+                  onExitFullscreen={() => setNetworkFullscreen(false)}
+                  forceFullscreenLabels
+                  isPlaying={query.playback.isPlaying}
+                  onFullscreenHintChange={setNetworkFullscreenHint}
+                />
+              </Suspense>
+            </div>
+            <aside className="panel flex min-h-0 flex-col gap-3 p-3 md:overflow-auto">
+              <PlaybackControls timelineTicks={timelineTicks} />
+              {networkFullscreenHint ? (
+                <NetworkAllianceHint
+                  hint={networkFullscreenHint}
+                  flagAssetsPayload={bundle.flagAssetsPayload}
+                  className="rounded-md border border-slate-300 bg-slate-50 p-3 text-xs text-slate-700"
+                />
+              ) : (
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                  Hover a node for details. Shift+click a node to toggle an anchor while preserving normal click-to-focus behavior.
+                </div>
+              )}
+            </aside>
           </div>
         </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
-            onClick={handleExportCsv}
-          >
-            Export CSV
-          </button>
-          <button
-            type="button"
-            className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
-            onClick={handleExportJson}
-          >
-            Export JSON Context
-          </button>
-          <button
-            type="button"
-            className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
-            onClick={() => {
-              void handleShare();
-            }}
-          >
-            Copy Share Link
-          </button>
-          <button
-            type="button"
-            className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50"
-            onClick={resetAll}
-          >
-            Reset All State
-          </button>
-          <div className="text-xs text-muted">
-            Focus: Alliance {query.focus.allianceId ?? "none"} | Edge {query.focus.edgeKey ?? "none"}
-          </div>
-          <button
-            type="button"
-            className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={clearFocus}
-            disabled={query.focus.allianceId === null && query.focus.edgeKey === null}
-          >
-            Clear Focus
-          </button>
-        </div>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <MetricCard label="Scoped Events" value={formatNumber(scopedEvents.length)} />
-          <MetricCard label="Signed" value={formatNumber(countsByAction.signed ?? 0)} />
-          <MetricCard
-            label="Terminal"
-            value={formatNumber(
-              (countsByAction.cancelled ?? 0) +
-                (countsByAction.expired ?? 0) +
-                (countsByAction.ended ?? 0) +
-                (countsByAction.inferred_cancelled ?? 0)
-            )}
-          />
-          <MetricCard label="Flags" value={formatNumber(bundle.flags.length)} />
-        </div>
-      </section>
-
-      <FilterBar
-        indices={bundle.indices}
-        timelineTicks={timelineTicks}
-        hasScoreData={hasScoreData}
-        hasScoreRankData={hasScoreRankData}
-      />
-
-      <section className="grid gap-4 xl:grid-cols-2 [&>*]:min-w-0">
-        <Suspense fallback={<section className="panel p-4 text-sm text-muted">Loading timeline view...</section>}>
-          <TimelineView
-            pulse={pulse}
-            playhead={query.playback.playhead}
-            timeRange={query.time}
-            onSetPlayhead={handleSetPlayhead}
-            onSetRange={handleSetRange}
-          />
-        </Suspense>
-        <Suspense fallback={<section className="panel p-4 text-sm text-muted">Loading network view...</section>}>
-          <NetworkView
-            allEvents={bundle.events}
-            scopedIndexes={scopedSelectionIndexes}
-            baseQuery={baseQuery}
-            playhead={query.playback.playhead}
-            focusedAllianceId={query.focus.allianceId}
-            focusedEdgeKey={query.focus.edgeKey}
-            sizeByScore={query.filters.sizeByScore}
-            showFlags={showFlags}
-            flagAssetsPayload={bundle.flagAssetsPayload}
-            allianceScoresByDay={allianceScores?.byDay ?? null}
-            allianceScoreDays={allianceScoreDays}
-            scoreLoadSnapshot={scoreLoadSnapshot}
-            scoreManifestDeclared={scoreFileDeclared}
-            onRetryScoreLoad={() => setScoreRetryNonce((current) => current + 1)}
-            resolveAllianceFlagAtPlayhead={resolveAllianceFlagAtPlayhead}
-            onFocusAlliance={(allianceId) => setFocus({ allianceId, edgeKey: null, eventId: null })}
-            onFocusEdge={(edgeKey) => setFocus({ edgeKey, eventId: null })}
-          />
-        </Suspense>
-      </section>
-
-      <InspectorView
-        events={scopedEvents}
-        onSelectPlayhead={handleSetPlayhead}
-        onFocusAlliance={(allianceId) => setFocus({ allianceId, edgeKey: null })}
-      />
-    </main>
+      ) : null}
+    </>
   );
 }
 

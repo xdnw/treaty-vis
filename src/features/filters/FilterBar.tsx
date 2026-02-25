@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  useFilterStore,
-  type PlaybackSpeed,
-  type SortDirection,
-  type SortField
-} from "@/features/filters/filterStore";
+import { useFilterStore, type SortDirection, type SortField } from "@/features/filters/filterStore";
+import { PlaybackControls } from "@/features/filters/PlaybackControls";
 import type { TimelapseIndices } from "@/domain/timelapse/selectors";
 
 type Props = {
@@ -57,9 +53,6 @@ export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankDa
   const setTextQuery = useFilterStore((state) => state.setTextQuery);
   const setSort = useFilterStore((state) => state.setSort);
   const setTimeRange = useFilterStore((state) => state.setTimeRange);
-  const setPlayhead = useFilterStore((state) => state.setPlayhead);
-  const setPlaying = useFilterStore((state) => state.setPlaying);
-  const setPlaybackSpeed = useFilterStore((state) => state.setPlaybackSpeed);
   const toggleAlliance = useFilterStore((state) => state.toggleAlliance);
   const toggleAction = useFilterStore((state) => state.toggleAction);
   const toggleTreatyType = useFilterStore((state) => state.toggleTreatyType);
@@ -71,6 +64,7 @@ export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankDa
   const setSizeByScore = useFilterStore((state) => state.setSizeByScore);
   const setShowFlags = useFilterStore((state) => state.setShowFlags);
   const clearFilters = useFilterStore((state) => state.clearFilters);
+  const isNetworkFullscreen = useFilterStore((state) => state.isNetworkFullscreen);
   const [allianceSearch, setAllianceSearch] = useState("");
   const [activeAllianceOption, setActiveAllianceOption] = useState(0);
   const [pendingTextQuery, setPendingTextQuery] = useState(query.textQuery);
@@ -102,15 +96,6 @@ export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankDa
       )
       .slice(0, 80);
   }, [allianceSearch, indices.alliances]);
-
-  const playheadIndex = useMemo(() => {
-    const current = query.playback.playhead;
-    if (!current) {
-      return timelineTicks.length > 0 ? timelineTicks.length - 1 : 0;
-    }
-    const index = timelineTicks.findIndex((item) => item === current);
-    return index >= 0 ? index : timelineTicks.length > 0 ? timelineTicks.length - 1 : 0;
-  }, [query.playback.playhead, timelineTicks]);
 
   return (
     <section className="panel p-4">
@@ -176,44 +161,7 @@ export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankDa
           </div>
         </div>
 
-        <div className="space-y-2">
-          <h3 className="text-xs font-semibold uppercase text-slate-600">Playback</h3>
-          <div className="flex items-center gap-2">
-            <button
-              className="rounded-md border border-slate-300 px-2 py-1 text-sm hover:bg-slate-50"
-              onClick={() => setPlaying(!query.playback.isPlaying)}
-              type="button"
-            >
-              {query.playback.isPlaying ? "Pause" : "Play"}
-            </button>
-            <select
-              className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-              value={query.playback.speed}
-              onChange={(event) => setPlaybackSpeed(Number(event.target.value) as PlaybackSpeed)}
-            >
-              <option value={1}>1x</option>
-              <option value={2}>2x</option>
-              <option value={4}>4x</option>
-              <option value={8}>8x</option>
-              <option value={16}>16x</option>
-              <option value={32}>32x</option>
-            </select>
-          </div>
-          <input
-            className="w-full"
-            type="range"
-            min={0}
-            max={Math.max(0, timelineTicks.length - 1)}
-            step={1}
-            value={playheadIndex}
-            onChange={(event) => {
-              const nextIndex = Number(event.target.value);
-              const nextPlayhead = timelineTicks[nextIndex] ?? null;
-              setPlayhead(nextPlayhead);
-            }}
-          />
-          <div className="text-xs text-muted">Playhead: {query.playback.playhead?.slice(0, 16) ?? "latest"}</div>
-        </div>
+        {!isNetworkFullscreen ? <PlaybackControls timelineTicks={timelineTicks} className="space-y-2" /> : null}
 
         <div>
           <h3 className="mb-1 text-xs font-semibold uppercase text-slate-600">Action Filters</h3>

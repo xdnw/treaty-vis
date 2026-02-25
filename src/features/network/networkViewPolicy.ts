@@ -54,3 +54,31 @@ export function buildHoverResetKey(baseQuery: QueryState, options: BuildHoverRes
     scopedFingerprint
   ].join("|");
 }
+
+export function shouldExitNetworkFullscreenOnEscape(eventKey: string, isNetworkFullscreen: boolean): boolean {
+  return isNetworkFullscreen && eventKey === "Escape";
+}
+
+export function shouldForceNodeLabel(
+  isFullscreen: boolean,
+  forceFullscreenLabels: boolean,
+  isPriorityNode: boolean
+): boolean {
+  if (isFullscreen && forceFullscreenLabels) {
+    return true;
+  }
+  return isPriorityNode;
+}
+
+export function quantizePlayheadIndexForAutoplay(index: number, speed: number): number {
+  if (!Number.isFinite(index) || index < 0) {
+    return 0;
+  }
+  const normalizedSpeed = Number.isFinite(speed) && speed > 0 ? speed : 1;
+  if (normalizedSpeed <= 8) {
+    return Math.floor(index);
+  }
+
+  const step = normalizedSpeed >= 32 ? 4 : normalizedSpeed >= 16 ? 3 : 2;
+  return Math.floor(Math.floor(index) / step) * step;
+}

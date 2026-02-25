@@ -5,7 +5,10 @@ import {
   FLAG_PRESSURE_SCORE_ELEVATED_RECOVER,
   FLAG_PRESSURE_SCORE_ELEVATED_TRIGGER,
   buildHoverResetKey,
-  derivePressureLevel
+  derivePressureLevel,
+  quantizePlayheadIndexForAutoplay,
+  shouldExitNetworkFullscreenOnEscape,
+  shouldForceNodeLabel
 } from "@/features/network/networkViewPolicy";
 import type { QueryState } from "@/features/filters/filterStore";
 
@@ -103,6 +106,40 @@ describe("networkViewPolicy", () => {
       });
 
       expect(modifiedKey).not.toBe(originalKey);
+    });
+  });
+
+  describe("shouldExitNetworkFullscreenOnEscape", () => {
+    it("returns true only for Escape while fullscreen is active", () => {
+      expect(shouldExitNetworkFullscreenOnEscape("Escape", true)).toBe(true);
+      expect(shouldExitNetworkFullscreenOnEscape("Enter", true)).toBe(false);
+      expect(shouldExitNetworkFullscreenOnEscape("Escape", false)).toBe(false);
+    });
+  });
+
+  describe("shouldForceNodeLabel", () => {
+    it("forces all node labels in fullscreen when policy flag is enabled", () => {
+      expect(shouldForceNodeLabel(true, true, false)).toBe(true);
+      expect(shouldForceNodeLabel(true, true, true)).toBe(true);
+    });
+
+    it("falls back to priority labels outside fullscreen force mode", () => {
+      expect(shouldForceNodeLabel(false, true, true)).toBe(true);
+      expect(shouldForceNodeLabel(false, true, false)).toBe(false);
+      expect(shouldForceNodeLabel(true, false, true)).toBe(true);
+      expect(shouldForceNodeLabel(true, false, false)).toBe(false);
+    });
+  });
+
+  describe("quantizePlayheadIndexForAutoplay", () => {
+    it("keeps full index precision at lower speeds", () => {
+      expect(quantizePlayheadIndexForAutoplay(17, 1)).toBe(17);
+      expect(quantizePlayheadIndexForAutoplay(17, 8)).toBe(17);
+    });
+
+    it("quantizes index more aggressively at high speeds", () => {
+      expect(quantizePlayheadIndexForAutoplay(17, 16)).toBe(15);
+      expect(quantizePlayheadIndexForAutoplay(17, 32)).toBe(16);
     });
   });
 });

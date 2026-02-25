@@ -120,4 +120,41 @@ describe("filterStore reset semantics", () => {
 
     expect(useFilterStore.getState().query).toEqual(makeDefaultQuery());
   });
+
+  it("clearFilters and resetAll always exit network fullscreen", () => {
+    useFilterStore.setState({ query: makeNonDefaultQuery(), isNetworkFullscreen: true });
+
+    useFilterStore.getState().clearFilters();
+    expect(useFilterStore.getState().isNetworkFullscreen).toBe(false);
+
+    useFilterStore.setState({ query: makeNonDefaultQuery(), isNetworkFullscreen: true });
+    useFilterStore.getState().resetAll();
+    expect(useFilterStore.getState().isNetworkFullscreen).toBe(false);
+  });
+});
+
+describe("filterStore playback speed parsing", () => {
+  it("deserializes speed 16 and 32", () => {
+    expect(deserializeQueryState("?speed=16").playback?.speed).toBe(16);
+    expect(deserializeQueryState("?speed=32").playback?.speed).toBe(32);
+  });
+
+  it("serializes non-default 16 and 32 speeds", () => {
+    const speed16 = makeDefaultQuery();
+    speed16.playback.speed = 16;
+    expect(serializeQueryState(speed16)).toContain("speed=16");
+
+    const speed32 = makeDefaultQuery();
+    speed32.playback.speed = 32;
+    expect(serializeQueryState(speed32)).toContain("speed=32");
+  });
+
+  it("allows fullscreen setter transitions", () => {
+    useFilterStore.setState({ isNetworkFullscreen: false });
+    useFilterStore.getState().setNetworkFullscreen(true);
+    expect(useFilterStore.getState().isNetworkFullscreen).toBe(true);
+
+    useFilterStore.getState().setNetworkFullscreen(false);
+    expect(useFilterStore.getState().isNetworkFullscreen).toBe(false);
+  });
 });

@@ -3,7 +3,7 @@ import { create } from "zustand";
 export type EvidenceMode = "all" | "one-confirmed" | "both-confirmed";
 export type SortField = "timestamp" | "action" | "type" | "from" | "to" | "source";
 export type SortDirection = "asc" | "desc";
-export type PlaybackSpeed = 1 | 2 | 4 | 8;
+export type PlaybackSpeed = 1 | 2 | 4 | 8 | 16 | 32;
 
 export type QueryFilters = {
   alliances: number[];
@@ -50,7 +50,9 @@ export type QueryState = {
 
 type FilterStore = {
   query: QueryState;
+  isNetworkFullscreen: boolean;
   setStateFromUrl: (state: Partial<QueryState>) => void;
+  setNetworkFullscreen: (value: boolean) => void;
   setTimeRange: (start: string | null, end: string | null) => void;
   setPlayhead: (playhead: string | null) => void;
   setPlaying: (isPlaying: boolean) => void;
@@ -208,7 +210,8 @@ export function deserializeQueryState(search: string): Partial<QueryState> {
 
   const sortDirection: SortDirection = sortDirectionRaw === "asc" ? "asc" : "desc";
 
-  const speed: PlaybackSpeed = speedRaw === 2 || speedRaw === 4 || speedRaw === 8 ? speedRaw : 1;
+  const speed: PlaybackSpeed =
+    speedRaw === 2 || speedRaw === 4 || speedRaw === 8 || speedRaw === 16 || speedRaw === 32 ? speedRaw : 1;
 
   return {
     time: {
@@ -319,6 +322,7 @@ export function serializeQueryState(query: QueryState): string {
 
 export const useFilterStore = create<FilterStore>((set) => ({
   query: createDefaultQueryState(),
+  isNetworkFullscreen: false,
   setStateFromUrl: (state) => {
     set((current) => ({
       query: {
@@ -346,6 +350,9 @@ export const useFilterStore = create<FilterStore>((set) => ({
         }
       }
     }));
+  },
+  setNetworkFullscreen: (value) => {
+    set({ isNetworkFullscreen: value });
   },
   setTimeRange: (start, end) => {
     set((state) => ({
@@ -556,9 +563,9 @@ export const useFilterStore = create<FilterStore>((set) => ({
     }));
   },
   clearFilters: () => {
-    set({ query: createDefaultQueryState() });
+    set({ query: createDefaultQueryState(), isNetworkFullscreen: false });
   },
   resetAll: () => {
-    set({ query: createDefaultQueryState() });
+    set({ query: createDefaultQueryState(), isNetworkFullscreen: false });
   }
 }));

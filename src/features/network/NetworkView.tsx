@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Graph from "graphology";
 import Sigma from "sigma";
 import type { ScoreLoaderSnapshot } from "@/domain/timelapse/scoreLoader";
@@ -18,7 +18,13 @@ import {
   type FlagPressureLevel,
   type FlagRenderMode
 } from "@/features/network/flagRender";
-import { buildHoverResetKey, derivePressureLevel } from "@/features/network/networkViewPolicy";
+import {
+  buildHoverResetKey,
+  derivePressureLevel,
+  quantizePlayheadIndexForAutoplay,
+  shouldForceNodeLabel
+} from "@/features/network/networkViewPolicy";
+import { NetworkAllianceHint, type NetworkAllianceHintData } from "@/features/network/NetworkAllianceHint";
 import { markTimelapsePerf } from "@/lib/perf";
 
 type TreatyTypeStyle = {
@@ -127,6 +133,12 @@ type Props = {
   resolveAllianceFlagAtPlayhead: (allianceId: number, playhead: string | null) => AllianceFlagSnapshot | null;
   onFocusAlliance: (allianceId: number | null) => void;
   onFocusEdge: (edgeKey: string | null) => void;
+  isFullscreen: boolean;
+  onEnterFullscreen: () => void;
+  onExitFullscreen: () => void;
+  forceFullscreenLabels: boolean;
+  isPlaying: boolean;
+  onFullscreenHintChange?: (hint: NetworkAllianceHintData | null) => void;
 };
 
 function calcMaxEdges(width: number, height: number): number {
@@ -253,8 +265,7 @@ function displayLabelForBand(fullLabel: string, zoomBand: ZoomBand, priorityLabe
 type NodePayload = {
   id: string;
   fullLabel: string;
-  displayLabel: string | null;
-  forceLabel: boolean;
+  isPriorityNode: boolean;
   degree: number;
   counterparties: number;
   treatyCount: number;
@@ -294,48 +305,6 @@ type HoverPayload = {
   allianceId: string;
 };
 
-type FlagSpriteProps = {
-  allianceLabel: string;
-  flagKey: string;
-  flagAssetsPayload: FlagAssetsPayload;
-};
-
-function FlagSprite({ allianceLabel, flagKey, flagAssetsPayload }: FlagSpriteProps) {
-  const asset = flagAssetsPayload.assets[flagKey];
-  if (!asset) {
-    return <div className="text-slate-500">Flag unavailable</div>;
-  }
-
-  const atlas = flagAssetsPayload.atlas;
-  const fallbackSrc = atlas.png || atlas.webp;
-
-  return (
-    <div
-      className="inline-block overflow-hidden rounded border border-slate-300"
-      style={{ width: asset.w, height: asset.h }}
-      aria-label={`${allianceLabel} flag`}
-      title={`${allianceLabel} flag`}
-    >
-      <picture>
-        <source srcSet={atlas.webp} type="image/webp" />
-        <img
-          src={fallbackSrc}
-          alt={`${allianceLabel} flag`}
-          loading="lazy"
-          className="block"
-          style={{
-            width: atlas.width,
-            height: atlas.height,
-            maxWidth: "none",
-            maxHeight: "none",
-            transform: `translate(-${asset.x}px, -${asset.y}px)`
-          }}
-        />
-      </picture>
-    </div>
-  );
-}
-
 export function NetworkView({
   allEvents,
   scopedIndexes,
@@ -353,7 +322,13 @@ export function NetworkView({
   onRetryScoreLoad,
   resolveAllianceFlagAtPlayhead,
   onFocusAlliance,
-  onFocusEdge
+  onFocusEdge,
+  isFullscreen,
+  onEnterFullscreen,
+  onExitFullscreen,
+  forceFullscreenLabels,
+  isPlaying,
+  onFullscreenHintChange
 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<Sigma | null>(null);
@@ -379,6 +354,7 @@ export function NetworkView({
   const [framePressureLevel, setFramePressureLevel] = useState<FlagPressureLevel>("none");
   const [workerEdgeEventIndexes, setWorkerEdgeEventIndexes] = useState<number[] | null>(null);
   const networkRequestRef = useRef(0);
+  const refreshFrameRef = useRef<number | null>(null);
   const previousPositionsRef = useRef<Map<string, Point>>(new Map());
   const anchoredAllianceIds = useFilterStore((state) => state.query.filters.anchoredAllianceIds);
   const setAnchoredAllianceIds = useFilterStore((state) => state.setAnchoredAllianceIds);
@@ -469,12 +445,45 @@ export function NetworkView({
     [adaptiveBudget, budgetPreset]
   );
 
+  const scheduleRendererRefresh = useCallback(() => {
+    if (refreshFrameRef.current !== null) {
+      return;
+    }
+
+    refreshFrameRef.current = window.requestAnimationFrame(() => {
+      refreshFrameRef.current = null;
+      rendererRef.current?.refresh();
+    });
+  }, []);
+
+  const networkSelectionPlayhead = useMemo(() => {
+    if (!playhead || !isPlaying || allEvents.length === 0) {
+      return playhead;
+    }
+
+    let latestIndex = -1;
+    for (let index = 0; index < allEvents.length; index += 1) {
+      if (allEvents[index].timestamp <= playhead) {
+        latestIndex = index;
+      } else {
+        break;
+      }
+    }
+
+    if (latestIndex < 0) {
+      return playhead;
+    }
+
+    const quantizedIndex = quantizePlayheadIndexForAutoplay(latestIndex, baseQuery.playback.speed);
+    return allEvents[quantizedIndex]?.timestamp ?? playhead;
+  }, [allEvents, baseQuery.playback.speed, isPlaying, playhead]);
+
   useEffect(() => {
     networkRequestRef.current += 1;
     const requestId = networkRequestRef.current;
     setWorkerEdgeEventIndexes(null);
 
-    void selectTimelapseNetworkEventIndexes(baseQuery, playhead, maxEdges).then((workerIndexes) => {
+    void selectTimelapseNetworkEventIndexes(baseQuery, networkSelectionPlayhead, maxEdges).then((workerIndexes) => {
       if (networkRequestRef.current !== requestId) {
         return;
       }
@@ -482,7 +491,7 @@ export function NetworkView({
         setWorkerEdgeEventIndexes(Array.from(workerIndexes));
       }
     });
-  }, [baseQuery, maxEdges, playhead]);
+  }, [baseQuery, maxEdges, networkSelectionPlayhead]);
 
   const allianceNameById = useMemo(() => {
     const latestNameById = new Map<string, string>();
@@ -632,9 +641,6 @@ export function NetworkView({
     if (focusedAlliance !== null) {
       priorityLabelNodeIds.add(focusedAlliance);
     }
-    if (hovered?.allianceId) {
-      priorityLabelNodeIds.add(hovered.allianceId);
-    }
     const flagRenderMode = deriveFlagRenderMode(
       showFlags,
       flagAssetsPayload !== null,
@@ -733,14 +739,12 @@ export function NetworkView({
           : null;
       const spriteLookup = resolveAtlasSprite(flagAssetsPayload, flagSnapshot?.flagKey ?? null);
       const fullLabel = allianceNameById.get(id) ?? id;
-      const forceLabel = priorityLabelNodeIds.has(id);
-      const displayLabel = displayLabelForBand(fullLabel, zoomBand, forceLabel);
+      const isPriorityNode = priorityLabelNodeIds.has(id);
 
       return {
         id,
         fullLabel,
-        displayLabel,
-        forceLabel,
+        isPriorityNode,
         degree: meta.degree,
         counterparties: activeTreaties.length,
         treatyCount,
@@ -821,13 +825,11 @@ export function NetworkView({
     flagAssetsPayload,
     focusedAllianceId,
     focusedEdgeKey,
-    hovered?.allianceId,
     maxEdges,
     playhead,
     resolveAllianceFlagAtPlayhead,
     showFlags,
-    sizeByScore,
-    zoomBand
+    sizeByScore
   ]);
 
   useEffect(() => {
@@ -1046,6 +1048,10 @@ export function NetworkView({
     rendererRef.current = renderer;
 
     return () => {
+      if (refreshFrameRef.current !== null) {
+        window.cancelAnimationFrame(refreshFrameRef.current);
+        refreshFrameRef.current = null;
+      }
       if (typeof (camera as { off?: (event: "updated", handler: () => void) => void }).off === "function") {
         (camera as { off: (event: "updated", handler: () => void) => void }).off("updated", syncCameraRatio);
       }
@@ -1067,16 +1073,52 @@ export function NetworkView({
     const labelSize = zoomBand === "mid" ? 12 : 14;
     renderer.setSetting("labelRenderedSizeThreshold", labelThreshold);
     renderer.setSetting("labelSize", labelSize);
-    renderer.refresh();
-  }, [zoomBand]);
+    scheduleRendererRefresh();
+  }, [scheduleRendererRefresh, zoomBand]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer) {
       return;
     }
-    renderer.refresh();
-  }, [atlasReady]);
+    scheduleRendererRefresh();
+  }, [atlasReady, scheduleRendererRefresh]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const graphModel = graphRef.current;
+    if (!renderer || !graphModel) {
+      return;
+    }
+
+    for (const node of graph.nodes) {
+      if (!graphModel.hasNode(node.id)) {
+        continue;
+      }
+
+      const isHovered = hovered?.allianceId === node.id;
+      const forceLabel = shouldForceNodeLabel(
+        isFullscreen,
+        forceFullscreenLabels,
+        node.isPriorityNode || isHovered
+      );
+      const displayLabel = displayLabelForBand(node.fullLabel, zoomBand, forceLabel);
+
+      if (displayLabel) {
+        graphModel.setNodeAttribute(node.id, "label", displayLabel);
+      } else {
+        graphModel.removeNodeAttribute(node.id, "label");
+      }
+
+      if (forceLabel) {
+        graphModel.setNodeAttribute(node.id, "forceLabel", true);
+      } else {
+        graphModel.removeNodeAttribute(node.id, "forceLabel");
+      }
+    }
+
+    scheduleRendererRefresh();
+  }, [forceFullscreenLabels, graph.nodes, hovered?.allianceId, isFullscreen, scheduleRendererRefresh, zoomBand]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
@@ -1088,10 +1130,13 @@ export function NetworkView({
     graphModel.clear();
 
     for (const node of graph.nodes) {
+      const forceLabel = shouldForceNodeLabel(isFullscreen, forceFullscreenLabels, node.isPriorityNode);
+      const displayLabel = displayLabelForBand(node.fullLabel, zoomBand, forceLabel);
       const nodeAttributes: Record<string, unknown> = {
         x: node.x,
         y: node.y,
         fullLabel: node.fullLabel,
+        isPriorityNode: node.isPriorityNode,
         treatyCount: node.treatyCount,
         counterparties: node.counterparties,
         size: node.radius,
@@ -1099,10 +1144,10 @@ export function NetworkView({
         scoreDay: node.scoreDay,
         color: node.highlighted ? "#2b8a3e" : node.anchored ? "#d9480f" : "#0c8599"
       };
-      if (node.displayLabel) {
-        nodeAttributes.label = node.displayLabel;
+      if (displayLabel) {
+        nodeAttributes.label = displayLabel;
       }
-      if (node.forceLabel) {
+      if (forceLabel) {
         nodeAttributes.forceLabel = true;
       }
       if (graph.flagRenderMode !== "off" && node.flagSprite) {
@@ -1133,9 +1178,8 @@ export function NetworkView({
       });
     }
 
-    const refreshStartedAt = performance.now();
-    renderer.refresh();
-    const refreshMs = performance.now() - refreshStartedAt;
+    scheduleRendererRefresh();
+    const refreshMs = flagDrawMsRef.current;
     markTimelapsePerf("network.renderer.refresh", refreshMs);
 
     const overBudget = refreshMs > FLAG_PRESSURE_REFRESH_MS || graph.graphBuildMs > FLAG_PRESSURE_BUILD_MS;
@@ -1160,7 +1204,18 @@ export function NetworkView({
       refreshMs: Number(refreshMs.toFixed(2)),
       graphBuildMs: Number(graph.graphBuildMs.toFixed(2))
     });
-  }, [cameraRatio, graph.flagRenderMode, graph.flagResolvedNodeCount, graph.graphBuildMs, graph.links, graph.nodes]);
+  }, [
+    cameraRatio,
+    forceFullscreenLabels,
+    graph.flagRenderMode,
+    graph.flagResolvedNodeCount,
+    graph.graphBuildMs,
+    graph.links,
+    graph.nodes,
+    isFullscreen,
+    scheduleRendererRefresh,
+    zoomBand
+  ]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
@@ -1168,8 +1223,8 @@ export function NetworkView({
       return;
     }
     renderer.resize();
-    renderer.refresh();
-  }, [size.height, size.width]);
+    scheduleRendererRefresh();
+  }, [scheduleRendererRefresh, size.height, size.width]);
 
   const focusedDetail = useMemo(() => {
     if (focusedAllianceId === null) {
@@ -1181,6 +1236,33 @@ export function NetworkView({
     }
     return `Focused Alliance: ${node.fullLabel} | Treaties: ${node.treatyCount} | Counterparties: ${node.counterparties}`;
   }, [focusedAllianceId, graph.nodes]);
+
+  const hoveredHintData = useMemo<NetworkAllianceHintData | null>(() => {
+    if (!hoveredAlliance) {
+      return null;
+    }
+    return {
+      id: hoveredAlliance.id,
+      fullLabel: hoveredAlliance.fullLabel,
+      score: hoveredAlliance.score,
+      scoreDay: hoveredAlliance.scoreDay,
+      treatyCount: hoveredAlliance.treatyCount,
+      counterparties: hoveredAlliance.counterparties,
+      flagKey: hoveredFlagKey,
+      activeTreaties: hoveredAlliance.activeTreaties
+    };
+  }, [hoveredAlliance, hoveredFlagKey]);
+
+  useEffect(() => {
+    if (!onFullscreenHintChange) {
+      return;
+    }
+    if (!isFullscreen) {
+      onFullscreenHintChange(null);
+      return;
+    }
+    onFullscreenHintChange(hoveredHintData);
+  }, [hoveredHintData, isFullscreen, onFullscreenHintChange]);
 
   const scoreStatusRows = useMemo(() => {
     const dayCount = allianceScoreDays.length;
@@ -1219,14 +1301,33 @@ export function NetworkView({
   }, [scoreLoadSnapshot]);
 
   return (
-    <section className="panel p-4">
-      <header className="mb-2 flex items-center justify-between">
-        <h2 className="text-lg">Network Explorer</h2>
-        <span className="text-xs text-muted">
-          {graph.renderedEdges} edges / {graph.budgetLabel} LOD budget
-        </span>
-      </header>
-      <div className="mb-3 space-y-2">
+    <section className={isFullscreen ? "panel relative h-full w-full rounded-xl p-2 md:p-3" : "panel p-4"}>
+      {isFullscreen ? (
+        <button
+          type="button"
+          className="absolute right-3 top-3 z-10 rounded border border-slate-300 bg-white/95 px-2 py-1 text-xs hover:bg-slate-100"
+          onClick={onExitFullscreen}
+        >
+          Exit Fullscreen
+        </button>
+      ) : (
+        <header className="mb-2 flex items-center justify-between">
+          <h2 className="text-lg">Network Explorer</h2>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted">
+              {graph.renderedEdges} edges / {graph.budgetLabel} LOD budget
+            </span>
+            <button
+              type="button"
+              className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100"
+              onClick={onEnterFullscreen}
+            >
+              Fullscreen
+            </button>
+          </div>
+        </header>
+      )}
+      {!isFullscreen ? <div className="mb-3 space-y-2">
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
           <label htmlFor="lod-budget">LOD budget</label>
           <select
@@ -1266,14 +1367,14 @@ export function NetworkView({
             ))}
           </div>
         </div>
-      </div>
-      <div className="mb-2 text-xs text-muted">
+      </div> : null}
+      {!isFullscreen ? <div className="mb-2 text-xs text-muted">
         {graph.nodes.length} alliances shown | {graph.renderedEdges} treaties shown | Node size by {graph.scoreSizingActive ? "score" : "connections"}
         {graph.scoreSizingActive
           ? ` | scored ${graph.scoreSizedNodeCount}/${graph.nodes.length} (${graph.scoreDay ?? "n/a"})`
           : ""}
-      </div>
-      <div className="mb-2 rounded border border-slate-300 bg-slate-50 px-2 py-2 text-[11px] text-slate-800">
+      </div> : null}
+      {!isFullscreen ? <div className="mb-2 rounded border border-slate-300 bg-slate-50 px-2 py-2 text-[11px] text-slate-800">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {scoreStatusRows.map((row) => (
             <span key={row.label}>
@@ -1296,53 +1397,19 @@ export function NetworkView({
             Retry score load
           </button>
         </div>
-      </div>
-      <div ref={hostRef} className="h-[350px] overflow-hidden rounded-xl border border-slate-200" />
-      {hoveredAlliance ? (
-        <div className="mt-2 rounded-md border border-slate-300 bg-slate-50 p-3 text-xs text-slate-700">
-          <div className="text-[11px] uppercase tracking-wide text-slate-500">Alliance</div>
-          <div className="text-sm font-semibold text-slate-900">{hoveredAlliance.fullLabel}</div>
-
-          <div className="mt-2 text-[11px] uppercase tracking-wide text-slate-500">Score</div>
-          <div>
-            {typeof hoveredAlliance.score === "number" && Number.isFinite(hoveredAlliance.score)
-              ? `${hoveredAlliance.score.toLocaleString(undefined, { maximumFractionDigits: 2 })}${hoveredAlliance.scoreDay ? ` (${hoveredAlliance.scoreDay})` : ""}`
-              : "n/a"}
-          </div>
-
-          <div className="mt-2 text-[11px] uppercase tracking-wide text-slate-500">Flag</div>
-          {hoveredFlagKey && flagAssetsPayload ? (
-            <FlagSprite
-              allianceLabel={hoveredAlliance.fullLabel}
-              flagKey={hoveredFlagKey}
-              flagAssetsPayload={flagAssetsPayload}
-            />
-          ) : (
-            <div className="text-slate-500">Flag unavailable</div>
-          )}
-
-          <div className="mt-2 text-[11px] uppercase tracking-wide text-slate-500">Active Treaties / Counterparties</div>
-          <div className="mb-1 text-slate-600">
-            {hoveredAlliance.treatyCount} treaties across {hoveredAlliance.counterparties} counterparties
-          </div>
-          {hoveredAlliance.activeTreaties.length > 0 ? (
-            <ul className="space-y-1">
-              {hoveredAlliance.activeTreaties.map((treaty) => (
-                <li key={`${hoveredAlliance.id}:${treaty.counterpartyId}`} className="leading-tight">
-                  <span className="font-medium">{treaty.counterpartyLabel}</span>: {treaty.treatyTypes.join(", ")}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div>none</div>
-          )}
-        </div>
+      </div> : null}
+      <div
+        ref={hostRef}
+        className={isFullscreen ? "h-full overflow-hidden rounded-xl border border-slate-200" : "h-[350px] overflow-hidden rounded-xl border border-slate-200"}
+      />
+      {!isFullscreen && hoveredHintData ? (
+        <NetworkAllianceHint hint={hoveredHintData} flagAssetsPayload={flagAssetsPayload} className="mt-2 rounded-md border border-slate-300 bg-slate-50 p-3 text-xs text-slate-700" />
       ) : null}
-      {focusedDetail ? <div className="mt-2 text-xs text-slate-700">{focusedDetail}</div> : null}
-      <p className="mt-2 text-xs text-muted">
+      {!isFullscreen && focusedDetail ? <div className="mt-2 text-xs text-slate-700">{focusedDetail}</div> : null}
+      {!isFullscreen ? <p className="mt-2 text-xs text-muted">
         LOD budget controls rendered edge count to keep interaction responsive on large graphs.
-      </p>
-      <p className="text-xs text-muted">Shift+click a node to toggle an anchor while keeping regular click-to-focus behavior.</p>
+      </p> : null}
+      {!isFullscreen ? <p className="text-xs text-muted">Shift+click a node to toggle an anchor while keeping regular click-to-focus behavior.</p> : null}
     </section>
   );
 }
