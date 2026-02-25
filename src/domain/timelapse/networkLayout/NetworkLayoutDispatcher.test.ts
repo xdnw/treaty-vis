@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { runNetworkLayoutStrategy } from "@/domain/timelapse/networkLayout/NetworkLayoutDispatcher";
 import type { NetworkLayoutInput } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
 
@@ -47,6 +47,40 @@ function buildInputFromEdges(nodeIds: string[], edges: Array<[string, string]>, 
 
 function nodePositionSignature(input: ReturnType<typeof runNetworkLayoutStrategy>): string[] {
   return input.layout.nodeTargets.map((target) => `${target.nodeId}:${target.targetX.toFixed(4)},${target.targetY.toFixed(4)}`);
+}
+
+function lockSignature(output: ReturnType<typeof runNetworkLayoutStrategy>): {
+  components: string[];
+  communities: string[];
+  nodes: string[];
+} {
+  return {
+    components: output.layout.components
+      .map((c) => `${c.componentId}:${c.anchorX.toFixed(3)},${c.anchorY.toFixed(3)}:${c.nodeIds.length}`)
+      .sort(),
+    communities: output.layout.communities
+      .map((c) => `${c.communityId}:${c.componentId}:${c.anchorX.toFixed(3)},${c.anchorY.toFixed(3)}:${c.nodeIds.length}`)
+      .sort(),
+    nodes: output.layout.nodeTargets
+      .map(
+        (n) =>
+          `${n.nodeId}:${n.componentId}:${n.communityId}:${n.targetX.toFixed(3)},${n.targetY.toFixed(3)}:${n.neighborX.toFixed(3)},${n.neighborY.toFixed(3)}:${n.anchorX.toFixed(3)},${n.anchorY.toFixed(3)}`
+      )
+      .sort()
+  };
+}
+
+function withDeterministicRandom<T>(fn: () => T): T {
+  let state = 0x1234abcd;
+  const spy = vi.spyOn(Math, "random").mockImplementation(() => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x100000000;
+  });
+  try {
+    return fn();
+  } finally {
+    spy.mockRestore();
+  }
 }
 
 describe("NetworkLayoutDispatcher", () => {
@@ -152,5 +186,62 @@ describe("NetworkLayoutDispatcher", () => {
     const reusedCount = [...secondIds].filter((id) => firstIds.has(id)).length;
 
     expect(reusedCount).toBeGreaterThan(0);
+  });
+
+  it("locks deterministic behavior signature for existing strategies", () => {
+    const nodeIds = ["1", "2", "3", "4", "5", "6", "7", "8"];
+    const edges: Array<[string, string]> = [
+      ["1", "2"],
+      ["2", "3"],
+      ["3", "1"],
+      ["3", "4"],
+      ["4", "5"],
+      ["5", "6"],
+      ["6", "4"],
+      ["6", "7"],
+      ["7", "8"]
+    ];
+
+    const existingStrategies = ["balanced-temporal", "strict-temporal", "hybrid-backbone", "fa2line"] as const;
+
+    for (const strategy of existingStrategies) {
+      const first = withDeterministicRandom(() =>
+        runNetworkLayoutStrategy(strategy, buildInputFromEdges(nodeIds, edges))
+      );
+      const second = withDeterministicRandom(() =>
+        runNetworkLayoutStrategy(strategy, buildInputFromEdges([...nodeIds, "9"], [...edges, ["8", "9"]], first.metadata?.state))
+      );
+      const repeatSecond = withDeterministicRandom(() =>
+        runNetworkLayoutStrategy(strategy, buildInputFromEdges([...nodeIds, "9"], [...edges, ["8", "9"]], first.metadata?.state))
+      );
+
+      expect(lockSignature(second)).toEqual(lockSignature(repeatSecond));
+      expect(second.layout.components.length).toBeGreaterThan(0);
+      expect(second.layout.nodeTargets.length).toBe(9);
+      expect(second.layout.nodeTargets.every((n) => Number.isFinite(n.targetX) && Number.isFinite(n.targetY))).toBe(true);
+    }
+  });
+
+  it("routes and executes all new strategies", () => {
+    const input = buildInputFromEdges(
+      ["n1", "n2", "n3", "n4", "n5", "n6"],
+      [
+        ["n1", "n2"],
+        ["n2", "n3"],
+        ["n3", "n1"],
+        ["n3", "n4"],
+        ["n4", "n5"],
+        ["n5", "n6"],
+        ["n6", "n4"]
+      ]
+    );
+
+    const strategies = ["bh-fa2", "stress-majorization", "radial-sugiyama"] as const;
+    for (const strategy of strategies) {
+      const out = runNetworkLayoutStrategy(strategy, input);
+      expect(out.layout.nodeTargets.length).toBe(input.nodeIds.length);
+      expect(out.layout.components.length).toBeGreaterThan(0);
+      expect(out.layout.communities.length).toBeGreaterThan(0);
+    }
   });
 });

@@ -1553,9 +1553,6 @@ export function NetworkView({
         <NetworkAllianceHint hint={hoveredHintData} flagAssetsPayload={flagAssetsPayload} className="mt-2 rounded-md border border-slate-300 bg-slate-50 p-3 text-xs text-slate-700" />
       ) : null}
       {!isFullscreen && focusedDetail ? <div className="mt-2 text-xs text-slate-700">{focusedDetail}</div> : null}
-      {!isFullscreen ? <p className="mt-2 text-xs text-muted">
-        LOD budget controls rendered edge count to keep interaction responsive on large graphs.
-      </p> : null}
       {!isFullscreen ? <p className="text-xs text-muted">Shift+click a node to toggle an anchor while keeping regular click-to-focus behavior.</p> : null}
     </section>
   );

@@ -1,19 +1,25 @@
 import { FA2_LINE_STRATEGY_DEFINITION } from "@/domain/timelapse/networkLayout/FA2LineLayoutAlgorithm";
+import { BH_FA2_STRATEGY_DEFINITION } from "@/domain/timelapse/networkLayout/BHForceAtlas2LayoutAlgorithm";
 import { HYBRID_BACKBONE_STRATEGY_DEFINITION } from "@/domain/timelapse/networkLayout/HybridBackboneLayoutAlgorithm";
 import type {
   NetworkLayoutStrategyDefinition,
   NetworkLayoutStrategyField
 } from "@/domain/timelapse/networkLayout/NetworkLayoutStrategyDefinition";
+import { RADIAL_SUGIYAMA_STRATEGY_DEFINITION } from "@/domain/timelapse/networkLayout/RadialSugiyamaLayoutAlgorithm";
+import { STRESS_MAJORIZATION_STRATEGY_DEFINITION } from "@/domain/timelapse/networkLayout/StressMajorizationLayoutAlgorithm";
+import { STRICT_TEMPORAL_STRATEGY_DEFINITION } from "@/domain/timelapse/networkLayout/StrictTemporal";
 import type { INetworkLayoutAlgorithm } from "@/domain/timelapse/networkLayout/INetworkLayoutAlgorithm";
 import type { NetworkLayoutStrategy, NetworkLayoutStrategyConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
 import { BALANCED_TEMPORAL_STRATEGY_DEFINITION } from "./BalancedTemporal";
-import { STRICT_TEMPORAL_STRATEGY_DEFINITION } from "./StrictTemporal";
 
 export const NETWORK_LAYOUT_STRATEGY_DEFINITIONS: NetworkLayoutStrategyDefinition[] = [
   HYBRID_BACKBONE_STRATEGY_DEFINITION,
   BALANCED_TEMPORAL_STRATEGY_DEFINITION,
   STRICT_TEMPORAL_STRATEGY_DEFINITION,
-  FA2_LINE_STRATEGY_DEFINITION
+  FA2_LINE_STRATEGY_DEFINITION,
+  BH_FA2_STRATEGY_DEFINITION,
+  STRESS_MAJORIZATION_STRATEGY_DEFINITION,
+  RADIAL_SUGIYAMA_STRATEGY_DEFINITION
 ];
 
 export const DEFAULT_NETWORK_LAYOUT_STRATEGY: NetworkLayoutStrategy = FA2_LINE_STRATEGY_DEFINITION.strategy;
