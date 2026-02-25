@@ -32,9 +32,19 @@ def parse_args() -> argparse.Namespace:
 		help="Directory containing alliances-YYYY-MM-DD.csv.zip files",
 	)
 	parser.add_argument(
-		"--output",
+		"--output-scores",
 		default=str(WEB_PUBLIC_DATA_DIR / "alliance_scores_daily.msgpack"),
-		help="Output MessagePack path",
+		help="Output MessagePack path for full day -> alliance -> score payload",
+	)
+	parser.add_argument(
+		"--output-ranks",
+		default=str(WEB_PUBLIC_DATA_DIR / "alliance_score_ranks_daily.msgpack"),
+		help="Output MessagePack path for compact day -> alliance -> strict rank payload",
+	)
+	parser.add_argument(
+		"--output",
+		default=None,
+		help="Deprecated alias for --output-scores; when provided it overrides --output-scores",
 	)
 	parser.add_argument(
 		"--alliances-index-url",
@@ -205,10 +215,24 @@ def build_scores_payload(files: list[Path]) -> tuple[dict[str, dict[str, float]]
 	return ordered_days, skipped, records_written, rows_seen_total, rows_skipped_total
 
 
+def build_ranks_payload(scores_by_day: dict[str, dict[str, float]]) -> dict[str, dict[str, int]]:
+	ranks_by_day: dict[str, dict[str, int]] = {}
+	for day, day_scores in scores_by_day.items():
+		ranked = sorted(day_scores.items(), key=lambda item: (-item[1], int(item[0])))
+		day_ranks: dict[str, int] = {}
+		for index, (alliance_id, _) in enumerate(ranked, start=1):
+			day_ranks[alliance_id] = index
+		ranks_by_day[day] = day_ranks
+	return ranks_by_day
+
+
 def main() -> int:
 	args = parse_args()
 	alliances_dir = Path(args.alliances_dir).resolve()
-	output_path = Path(args.output).resolve()
+	output_scores = Path(args.output_scores).resolve()
+	if args.output:
+		output_scores = Path(args.output).resolve()
+	output_ranks = Path(args.output_ranks).resolve()
 
 	files, archive_flags = prepare_alliance_archives(
 		alliances_dir=alliances_dir,
@@ -223,13 +247,17 @@ def main() -> int:
 			print(f"[score] info: {json.dumps(flag, ensure_ascii=True)}", file=sys.stderr)
 
 	scores_by_day, skipped_files, records_written, rows_seen_total, rows_skipped_total = build_scores_payload(files)
-	payload = {"scores_by_day": scores_by_day}
+	ranks_by_day = build_ranks_payload(scores_by_day)
+	scores_payload = {"schema_version": 1, "scores_by_day": scores_by_day}
+	ranks_payload = {"schema_version": 1, "ranks_by_day": ranks_by_day}
 
-	output_path.parent.mkdir(parents=True, exist_ok=True)
-	output_path.write_bytes(msgpack.packb(payload, use_bin_type=True))
+	output_scores.parent.mkdir(parents=True, exist_ok=True)
+	output_scores.write_bytes(msgpack.packb(scores_payload, use_bin_type=True))
+	output_ranks.parent.mkdir(parents=True, exist_ok=True)
+	output_ranks.write_bytes(msgpack.packb(ranks_payload, use_bin_type=True))
 
 	print(
-		f"[score] wrote {output_path} "
+		f"[score] wrote scores={output_scores} and ranks={output_ranks} "
 		f"({len(scores_by_day)} days, {records_written} records, {len(skipped_files)} skipped files, "
 		f"{rows_seen_total} rows parsed, {rows_skipped_total} rows skipped)"
 	)

@@ -11,7 +11,10 @@ type Props = {
   indices: TimelapseIndices;
   timelineTicks: string[];
   hasScoreData: boolean;
+  hasScoreRankData: boolean;
 };
+
+const TOP_X_OPTIONS = [5, 10, 25, 50, 100];
 
 const SORT_FIELDS: Array<{ value: SortField; label: string }> = [
   { value: "timestamp", label: "Time" },
@@ -49,7 +52,7 @@ function dateTimeLocalToIso(value: string): string | null {
   return date.toISOString();
 }
 
-export function FilterBar({ indices, timelineTicks, hasScoreData }: Props) {
+export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankData }: Props) {
   const query = useFilterStore((state) => state.query);
   const setTextQuery = useFilterStore((state) => state.setTextQuery);
   const setSort = useFilterStore((state) => state.setSort);
@@ -64,6 +67,7 @@ export function FilterBar({ indices, timelineTicks, hasScoreData }: Props) {
   const setIncludeInferred = useFilterStore((state) => state.setIncludeInferred);
   const setIncludeNoise = useFilterStore((state) => state.setIncludeNoise);
   const setEvidenceMode = useFilterStore((state) => state.setEvidenceMode);
+  const setTopXByScore = useFilterStore((state) => state.setTopXByScore);
   const setSizeByScore = useFilterStore((state) => state.setSizeByScore);
   const setShowFlags = useFilterStore((state) => state.setShowFlags);
   const clearFilters = useFilterStore((state) => state.clearFilters);
@@ -312,6 +316,25 @@ export function FilterBar({ indices, timelineTicks, hasScoreData }: Props) {
             </select>
           </label>
           <label className="flex items-center gap-2">
+            Top-X by score
+            <select
+              className="rounded border border-slate-300 px-1 py-0.5"
+              value={query.filters.topXByScore ?? 0}
+              disabled={!hasScoreRankData}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setTopXByScore(Number.isFinite(next) && next > 0 ? next : null);
+              }}
+            >
+              <option value={0}>Off</option>
+              {TOP_X_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  Top {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
             <input
               checked={query.filters.sizeByScore && hasScoreData}
               disabled={!hasScoreData}
@@ -329,6 +352,9 @@ export function FilterBar({ indices, timelineTicks, hasScoreData }: Props) {
             Show alliance flags
           </label>
           <p className="text-xs text-muted">Loads local atlas-backed flag assets only when enabled.</p>
+          {!hasScoreRankData ? (
+            <p className="text-xs text-muted">Rank dataset not present. Top-X filtering is disabled.</p>
+          ) : null}
           {!hasScoreData ? (
             <p className="text-xs text-muted">Score dataset not present. Node size uses degree.</p>
           ) : null}

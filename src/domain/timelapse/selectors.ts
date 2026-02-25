@@ -1,4 +1,5 @@
-import type { TimelapseEvent } from "@/domain/timelapse/schema";
+import type { AllianceScoreRanksByDay, TimelapseEvent } from "@/domain/timelapse/schema";
+import { createScoreDayResolver } from "@/domain/timelapse/scoreDay";
 import type { QueryState } from "@/features/filters/filterStore";
 
 const TERMINAL_ACTIONS = new Set(["cancelled", "expired", "ended", "inferred_cancelled"]);
@@ -22,6 +23,7 @@ export type TimelapseDerivedData = {
   datasetKey: string;
   events: TimelapseEvent[];
   indices: TimelapseIndices;
+  allianceScoreRanksByDay: AllianceScoreRanksByDay | null;
 };
 
 export type SelectionResult = {
@@ -354,6 +356,46 @@ function filterByAlliances(values: number[], map: Record<string, number[]>): num
   return unionSorted(values.map((id) => map[String(id)] ?? []));
 }
 
+function buildTopXMembershipLookup(
+  ranksByDay: AllianceScoreRanksByDay,
+  topX: number
+): ((timestamp: string, allianceId: number) => boolean) | null {
+  const rankDays = Object.keys(ranksByDay).sort((left, right) => left.localeCompare(right));
+  if (rankDays.length === 0) {
+    return null;
+  }
+
+  const resolveRankDay = createScoreDayResolver(rankDays);
+  const membershipCache = new Map<string, Set<number>>();
+
+  return (timestamp: string, allianceId: number) => {
+    const rankDay = resolveRankDay(timestamp);
+    if (!rankDay) {
+      return false;
+    }
+
+    const cacheKey = `${rankDay}|${topX}`;
+    let members = membershipCache.get(cacheKey);
+    if (!members) {
+      members = new Set<number>();
+      const rankRow = ranksByDay[rankDay] ?? {};
+      for (const [allianceKey, rankRaw] of Object.entries(rankRow)) {
+        const rank = Number(rankRaw);
+        if (!Number.isFinite(rank) || rank > topX) {
+          continue;
+        }
+        const parsedAllianceId = Number(allianceKey);
+        if (Number.isFinite(parsedAllianceId)) {
+          members.add(parsedAllianceId);
+        }
+      }
+      membershipCache.set(cacheKey, members);
+    }
+
+    return members.has(allianceId);
+  };
+}
+
 function selectionCacheKey(datasetKey: string, query: QueryState): string {
   // Keep cache keys compact and deterministic for large 100k+ filter churn.
   return [
@@ -371,6 +413,7 @@ function selectionCacheKey(datasetKey: string, query: QueryState): string {
     query.filters.includeInferred ? "1" : "0",
     query.filters.includeNoise ? "1" : "0",
     query.filters.evidenceMode,
+    String(query.filters.topXByScore ?? ""),
     query.textQuery.trim().toLowerCase(),
     query.sort.field,
     query.sort.direction
@@ -433,12 +476,28 @@ export function selectEvents(derived: TimelapseDerivedData, query: QueryState): 
     end = Math.min(end, findEndIndex(events, query.playback.playhead));
   }
 
+  const topXByScore = query.filters.topXByScore ?? null;
+  const topMembershipLookup =
+    topXByScore !== null &&
+    topXByScore > 0 &&
+    derived.allianceScoreRanksByDay !== null &&
+    Object.keys(derived.allianceScoreRanksByDay).length > 0
+      ? buildTopXMembershipLookup(derived.allianceScoreRanksByDay, topXByScore)
+      : null;
+
   const filtered = selected.filter((eventIndex) => {
     if (eventIndex < start || eventIndex > end) {
       return false;
     }
 
     const event = events[eventIndex];
+    if (
+      topMembershipLookup &&
+      (!topMembershipLookup(event.timestamp, event.from_alliance_id) ||
+        !topMembershipLookup(event.timestamp, event.to_alliance_id))
+    ) {
+      return false;
+    }
     if (!query.filters.includeInferred && event.inferred) {
       return false;
     }

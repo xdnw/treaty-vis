@@ -12,6 +12,10 @@ const requiredFiles = [
   "flag_assets.msgpack",
   "flag_atlas.webp",
   "flag_atlas.png",
+  "alliance_score_ranks_daily.msgpack"
+];
+
+const optionalFiles = [
   "alliance_scores_daily.msgpack"
 ];
 
@@ -53,6 +57,24 @@ async function main() {
   for (const fileName of requiredFiles) {
     const target = path.join(webData, fileName);
     const stat = await fs.stat(target);
+
+    manifest.files[fileName] = {
+      sizeBytes: stat.size,
+      sha256: await fileHash(target)
+    };
+  }
+
+  for (const fileName of optionalFiles) {
+    const target = path.join(webData, fileName);
+    let stat;
+    try {
+      stat = await fs.stat(target);
+    } catch (error) {
+      if (error && error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
 
     manifest.files[fileName] = {
       sizeBytes: stat.size,

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-24T20:33:53.136Z",
+  "generatedAt": "2026-02-25T03:06:10.979759Z",
   "files": {
     "treaty_changes_reconciled.msgpack": {
       "sizeBytes": 10216509,
@@ -7,20 +7,36 @@
     },
     "treaty_changes_reconciled_summary.msgpack": {
       "sizeBytes": 823,
-      "sha256": "de0fb394e817c6343c5790d8943db75973e0525c56d1d6fcae8de1467df8ab81"
+      "sha256": "51f091f5b9bd25fc5fbfe83799f3461564892c95bb3342996ac319f8a0aa075d"
     },
     "treaty_changes_reconciled_flags.msgpack": {
       "sizeBytes": 1218,
       "sha256": "1a2a59b2c0be11c2878b4f7bdbd405edc004f33f774c7915ca7ba88bb576489d"
     },
     "flags.msgpack": {
-      "sizeBytes": 3042706,
-      "sha256": "dab66dd6b6e733aebf35dda31954d4e953cbb28438527e681d26d1d6eb34a0a8"
+      "sizeBytes": 1704622,
+      "sha256": "6399f261451aedec014afd0d2c7fe2b20201cb0cb8f3d92975ccea8ddad7b8e4"
+    },
+    "flag_assets.msgpack": {
+      "sizeBytes": 124573,
+      "sha256": "167a1ffccb3df79a7f42b17ac3d0542f3d6538ac4ab7122201df2d0d46edede8"
+    },
+    "flag_atlas.webp": {
+      "sizeBytes": 383788,
+      "sha256": "fcb7e62eafc492230ebeb5dfdf7738d08420e48dbc16323b5e6ce1f821d2a724"
+    },
+    "flag_atlas.png": {
+      "sizeBytes": 504201,
+      "sha256": "f5087a3afe60719414083482d8d3677108c655d4e53c18366e97f2fe840ff8f1"
+    },
+    "alliance_score_ranks_daily.msgpack": {
+      "sizeBytes": 7860840,
+      "sha256": "4ce7e315eb00985d254ec584967ef0042bc9b1af8c646127a8f637e5c02e5bfc"
     },
     "alliance_scores_daily.msgpack": {
-      "sizeBytes": 14691236,
-      "sha256": "f6792ee29ad5b25abe373e758c4da51cf2ebb41ddb4f983be4748a29b48e7412"
+      "sizeBytes": 14699331,
+      "sha256": "d0f51bf6e8bf2d7e8798426ec2e278a3b983e118d164e05d87d05ebe35e7a160"
     }
   },
-  "datasetId": "fd5a7e09169a9908"
+  "datasetId": "f6d977b8617cc6a5"
 }

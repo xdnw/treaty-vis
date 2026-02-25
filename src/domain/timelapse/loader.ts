@@ -1,5 +1,6 @@
 import {
   allianceFlagsPayloadSchema,
+  allianceScoreRanksDailySchema,
   allianceScoresDailySchema,
   flagAssetsPayloadSchema,
   flagSchema,
@@ -9,6 +10,7 @@ import {
   type AllianceFlagSnapshot,
   type AllianceFlagTimelineByAlliance,
   type AllianceFlagsPayload,
+  type AllianceScoreRanksByDay,
   type AllianceScoresByDay,
   type FlagAssetsPayload,
   type TimelapseEvent,
@@ -37,7 +39,7 @@ export type TimelapseDataBundle = {
   allianceFlagsPayload: AllianceFlagsPayload | null;
   flagAssetsPayload: FlagAssetsPayload | null;
   allianceFlagTimelines: AllianceFlagTimelineByAlliance;
-  allianceScoresByDay: AllianceScoresByDay | null;
+  allianceScoreRanksByDay: AllianceScoreRanksByDay | null;
 };
 
 type RawTimelapsePayload = {
@@ -47,7 +49,7 @@ type RawTimelapsePayload = {
   flagsRaw: unknown[];
   allianceFlagsRaw: unknown | null;
   flagAssetsRaw: unknown | null;
-  scoresRaw: unknown | null;
+  scoreRanksRaw: unknown | null;
   manifestRaw: unknown | null;
 };
 
@@ -80,6 +82,8 @@ let selectionRequestId = 0;
 let pulseRequestId = 0;
 let networkRequestId = 0;
 let workerInstance: Worker | null = null;
+let allianceScoresPromise: Promise<AllianceScoresByDay | null> | null = null;
+let optionalFlagManifestWarningShown = false;
 const pendingSelectionRequests = new Map<number, PendingSelectRequest>();
 const pendingPulseRequests = new Map<number, PendingPulseRequest>();
 const pendingNetworkRequests = new Map<number, PendingNetworkRequest>();
@@ -232,7 +236,7 @@ async function fetchMsgpack<T>(url: string): Promise<T> {
 }
 
 async function loadTimelapsePayloadOnMainThread(showFlags: boolean): Promise<RawTimelapsePayload> {
-  const [eventsRaw, summaryRaw, flagsRaw, allianceFlagsRaw, flagAssetsRaw, scoresRaw, manifestRaw] = await Promise.all([
+  const [eventsRaw, summaryRaw, flagsRaw, allianceFlagsRaw, flagAssetsRaw, scoreRanksRaw, manifestRaw] = await Promise.all([
     fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled.msgpack"),
     fetchMsgpack<unknown>("/data/treaty_changes_reconciled_summary.msgpack"),
     fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled_flags.msgpack"),
@@ -258,7 +262,7 @@ async function loadTimelapsePayloadOnMainThread(showFlags: boolean): Promise<Raw
           })
           .catch(() => null)
       : Promise.resolve(null),
-    fetch("/data/alliance_scores_daily.msgpack")
+    fetch("/data/alliance_score_ranks_daily.msgpack")
       .then(async (response) => {
         if (!response.ok) {
           return null;
@@ -284,7 +288,7 @@ async function loadTimelapsePayloadOnMainThread(showFlags: boolean): Promise<Raw
     flagsRaw,
     allianceFlagsRaw,
     flagAssetsRaw,
-    scoresRaw,
+    scoreRanksRaw,
     manifestRaw
   };
 }
@@ -407,6 +411,7 @@ function toWorkerQueryState(query: QueryState): WorkerQueryState {
       includeInferred: query.filters.includeInferred,
       includeNoise: query.filters.includeNoise,
       evidenceMode: query.filters.evidenceMode,
+      topXByScore: query.filters.topXByScore,
       sizeByScore: query.filters.sizeByScore
     },
     textQuery: query.textQuery,
@@ -592,6 +597,13 @@ function parseOptionalFlagArtifacts(
     };
   }
 
+  if (allianceFlagsRaw === null) {
+    console.warn("Optional flags.msgpack dataset is unavailable; alliance flag timelines will be disabled.");
+  }
+  if (flagAssetsRaw === null) {
+    console.warn("Optional flag_assets.msgpack dataset is unavailable; network flag sprites will be disabled.");
+  }
+
   const parsedAllianceFlags = allianceFlagsRaw ? allianceFlagsPayloadSchema.safeParse(allianceFlagsRaw) : null;
   const allianceFlagsPayload = parsedAllianceFlags?.success ? parsedAllianceFlags.data : null;
   if (allianceFlagsRaw && parsedAllianceFlags && !parsedAllianceFlags.success) {
@@ -604,11 +616,35 @@ function parseOptionalFlagArtifacts(
     console.warn("Ignoring invalid optional flag assets dataset", parsedFlagAssets.error.message);
   }
 
+  if (allianceFlagsPayload && flagAssetsPayload === null) {
+    console.warn("Alliance flag timeline data loaded without valid atlas assets; sprite rendering will degrade gracefully.");
+  }
+  if (flagAssetsPayload && allianceFlagsPayload === null) {
+    console.warn("Flag atlas assets loaded without alliance timeline data; no alliance flag sprites will resolve.");
+  }
+
   return {
     allianceFlagsPayload,
     flagAssetsPayload,
     allianceFlagTimelines: normalizeAllianceFlagTimelines(allianceFlagsPayload)
   };
+}
+
+function validateOptionalFlagManifestEntries(manifest: TimelapseManifest | null, showFlags: boolean): void {
+  if (!showFlags || !manifest) {
+    return;
+  }
+
+  const requiredOptionalArtifacts = ["flags.msgpack", "flag_assets.msgpack"] as const;
+  const missing = requiredOptionalArtifacts.filter((name) => !(name in manifest.files));
+  if (missing.length === 0 || optionalFlagManifestWarningShown) {
+    return;
+  }
+
+  optionalFlagManifestWarningShown = true;
+  console.warn(
+    `Manifest is missing optional flag artifacts (${missing.join(", ")}) ; flag overlays will fall back without sprite assets.`
+  );
 }
 
 async function enrichBundleWithOptionalFlags(baseBundle: TimelapseDataBundle): Promise<TimelapseDataBundle> {
@@ -732,11 +768,12 @@ async function loadTimelapseBundleImpl(showFlags: boolean): Promise<TimelapseDat
     }
   }
 
-  const { eventsRaw, indicesRaw, summaryRaw, flagsRaw, allianceFlagsRaw, flagAssetsRaw, scoresRaw, manifestRaw } =
+  const { eventsRaw, indicesRaw, summaryRaw, flagsRaw, allianceFlagsRaw, flagAssetsRaw, scoreRanksRaw, manifestRaw } =
     await loadTimelapsePayloadInWorker(showFlags);
 
   const manifestParsed = manifestRaw ? manifestSchema.safeParse(manifestRaw) : null;
   const manifest = manifestParsed?.success ? manifestParsed.data : hydrationManifest;
+  validateOptionalFlagManifestEntries(manifest, showFlags);
   if (manifest?.datasetId) {
     const cached = await readCachedBundle(manifest.datasetId, manifestCacheIdentity(manifest), showFlags);
     if (cached) {
@@ -770,10 +807,10 @@ async function loadTimelapseBundleImpl(showFlags: boolean): Promise<TimelapseDat
     showFlags
   );
 
-  const parsedScores = scoresRaw ? allianceScoresDailySchema.safeParse(scoresRaw) : null;
-  const allianceScoresByDay = parsedScores?.success ? parsedScores.data.scores_by_day : null;
-  if (scoresRaw && parsedScores && !parsedScores.success) {
-    console.warn("Ignoring invalid optional alliance score dataset", parsedScores.error.message);
+  const parsedRanks = scoreRanksRaw ? allianceScoreRanksDailySchema.safeParse(scoreRanksRaw) : null;
+  const allianceScoreRanksByDay = parsedRanks?.success ? parsedRanks.data.ranks_by_day : null;
+  if (scoreRanksRaw && parsedRanks && !parsedRanks.success) {
+    console.warn("Ignoring invalid optional alliance score-rank dataset", parsedRanks.error.message);
   }
 
   const bundle: TimelapseDataBundle = {
@@ -785,7 +822,7 @@ async function loadTimelapseBundleImpl(showFlags: boolean): Promise<TimelapseDat
     allianceFlagsPayload,
     flagAssetsPayload,
     allianceFlagTimelines,
-    allianceScoresByDay
+    allianceScoreRanksByDay
   };
 
   if (manifest?.datasetId) {
@@ -832,5 +869,29 @@ export function loadTimelapseBundle(options?: TimelapseLoadOptions): Promise<Tim
   });
   bundlePromiseByMode.set(mode, nextPromise);
   return nextPromise;
+}
+
+export function loadAllianceScoresByDay(): Promise<AllianceScoresByDay | null> {
+  if (allianceScoresPromise) {
+    return allianceScoresPromise;
+  }
+
+  allianceScoresPromise = fetch("/data/alliance_scores_daily.msgpack")
+    .then(async (response) => {
+      if (!response.ok) {
+        return null;
+      }
+      const body = await response.arrayBuffer();
+      const decoded = decode(new Uint8Array(body)) as unknown;
+      const parsed = allianceScoresDailySchema.safeParse(decoded);
+      if (!parsed.success) {
+        console.warn("Ignoring invalid optional alliance score dataset", parsed.error.message);
+        return null;
+      }
+      return parsed.data.scores_by_day;
+    })
+    .catch(() => null);
+
+  return allianceScoresPromise;
 }
 

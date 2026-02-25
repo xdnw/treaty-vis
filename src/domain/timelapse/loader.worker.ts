@@ -4,6 +4,7 @@ import type {
   WorkerPulsePoint,
   WorkerQueryState
 } from "@/domain/timelapse/workerProtocol";
+import { createScoreDayResolver } from "@/domain/timelapse/scoreDay";
 import { decode } from "@msgpack/msgpack";
 
 type LoaderWorkerPayload = Extract<LoaderWorkerResponse, { kind: "load"; ok: true }>["payload"];
@@ -34,9 +35,12 @@ type WorkerEvent = {
   pair_max_id?: number;
 };
 
+type WorkerScoreRanksByDay = Record<string, Record<string, number>>;
+
 const selectionCache = new Map<string, Uint32Array>();
 const pulseCache = new Map<string, WorkerPulsePoint[]>();
 const networkCache = new Map<string, Uint32Array>();
+const topMembershipCache = new Map<string, Set<number>>();
 let loadedState: WorkerLoadedState | null = null;
 const TERMINAL_ACTIONS = new Set(["cancelled", "expired", "ended", "inferred_cancelled"]);
 
@@ -160,11 +164,11 @@ function buildIndexPayload(events: unknown[]) {
 }
 
 async function loadBasePayload(): Promise<WorkerBasePayload> {
-  const [eventsRaw, summaryRaw, flagsRaw, scoresRaw, manifestRaw] = await Promise.all([
+  const [eventsRaw, summaryRaw, flagsRaw, scoreRanksRaw, manifestRaw] = await Promise.all([
     fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled.msgpack"),
     fetchMsgpack<unknown>("/data/treaty_changes_reconciled_summary.msgpack"),
     fetchMsgpack<unknown[]>("/data/treaty_changes_reconciled_flags.msgpack"),
-    fetch("/data/alliance_scores_daily.msgpack")
+    fetch("/data/alliance_score_ranks_daily.msgpack")
       .then(async (response) => {
         if (!response.ok) {
           return null;
@@ -190,9 +194,81 @@ async function loadBasePayload(): Promise<WorkerBasePayload> {
     indicesRaw: buildIndexPayload(sorted),
     summaryRaw,
     flagsRaw,
-    scoresRaw,
+    scoreRanksRaw,
     manifestRaw
   };
+}
+
+function normalizeScoreRanksByDay(raw: unknown | null): WorkerScoreRanksByDay | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const candidate = raw as { ranks_by_day?: unknown };
+  const source =
+    candidate.ranks_by_day && typeof candidate.ranks_by_day === "object"
+      ? (candidate.ranks_by_day as Record<string, unknown>)
+      : (raw as Record<string, unknown>);
+
+  const normalized: WorkerScoreRanksByDay = {};
+  for (const [day, rowRaw] of Object.entries(source)) {
+    if (!rowRaw || typeof rowRaw !== "object") {
+      continue;
+    }
+
+    const row = rowRaw as Record<string, unknown>;
+    const dayRanks: Record<string, number> = {};
+    for (const [allianceId, rankRaw] of Object.entries(row)) {
+      const rank = Number(rankRaw);
+      if (!Number.isFinite(rank)) {
+        continue;
+      }
+      const normalizedRank = Math.floor(rank);
+      if (normalizedRank <= 0) {
+        continue;
+      }
+      dayRanks[String(allianceId)] = normalizedRank;
+    }
+
+    if (Object.keys(dayRanks).length > 0) {
+      normalized[day] = dayRanks;
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+function isInTopXByScore(
+  ranksByDay: WorkerScoreRanksByDay,
+  resolveRankDay: (timestampOrDay: string) => string | null,
+  eventTimestamp: string,
+  allianceId: number,
+  topX: number
+): boolean {
+  const resolvedDay = resolveRankDay(eventTimestamp);
+  if (!resolvedDay) {
+    return false;
+  }
+
+  const cacheKey = `${resolvedDay}|${topX}`;
+  let members = topMembershipCache.get(cacheKey);
+  if (!members) {
+    members = new Set<number>();
+    const dayRanks = ranksByDay[resolvedDay] ?? {};
+    for (const [allianceKey, rankRaw] of Object.entries(dayRanks)) {
+      const rank = Number(rankRaw);
+      if (!Number.isFinite(rank) || rank > topX) {
+        continue;
+      }
+      const parsedAllianceId = Number(allianceKey);
+      if (Number.isFinite(parsedAllianceId)) {
+        members.add(parsedAllianceId);
+      }
+    }
+    topMembershipCache.set(cacheKey, members);
+  }
+
+  return members.has(allianceId);
 }
 
 async function loadOptionalFlagPayload(): Promise<Pick<LoaderWorkerPayload, "allianceFlagsRaw" | "flagAssetsRaw">> {
@@ -200,6 +276,7 @@ async function loadOptionalFlagPayload(): Promise<Pick<LoaderWorkerPayload, "all
     fetch("/data/flags.msgpack")
       .then(async (response) => {
         if (!response.ok) {
+          console.warn("Optional flags.msgpack fetch failed in worker", response.status);
           return null;
         }
         const body = await response.arrayBuffer();
@@ -209,6 +286,7 @@ async function loadOptionalFlagPayload(): Promise<Pick<LoaderWorkerPayload, "all
     fetch("/data/flag_assets.msgpack")
       .then(async (response) => {
         if (!response.ok) {
+          console.warn("Optional flag_assets.msgpack fetch failed in worker", response.status);
           return null;
         }
         const body = await response.arrayBuffer();
@@ -362,7 +440,7 @@ function selectionKey(query: WorkerQueryState): string {
     query.filters.includeInferred ? "1" : "0",
     query.filters.includeNoise ? "1" : "0",
     query.filters.evidenceMode,
-    query.filters.sizeByScore ? "1" : "0",
+    String(query.filters.topXByScore ?? ""),
     query.textQuery.trim().toLowerCase(),
     query.sort.field,
     query.sort.direction
@@ -426,11 +504,25 @@ function computeSelectionIndexes(state: WorkerLoadedState, query: WorkerQuerySta
     end = Math.min(end, findEndIndex(events, query.playback.playhead));
   }
 
+  const topX = query.filters.topXByScore ?? null;
+  const ranksByDay = normalizeScoreRanksByDay(state.payload.scoreRanksRaw);
+  const rankDays = ranksByDay ? Object.keys(ranksByDay).sort((left, right) => left.localeCompare(right)) : [];
+  const resolveRankDay = rankDays.length > 0 ? createScoreDayResolver(rankDays) : null;
+  const applyTopX = topX !== null && topX > 0 && Boolean(ranksByDay) && Boolean(resolveRankDay);
+
   const filtered = selected.filter((eventIndex) => {
     if (eventIndex < start || eventIndex > end) {
       return false;
     }
     const event = events[eventIndex];
+    if (applyTopX && ranksByDay && resolveRankDay) {
+      if (
+        !isInTopXByScore(ranksByDay, resolveRankDay, event.timestamp, event.from_alliance_id, topX) ||
+        !isInTopXByScore(ranksByDay, resolveRankDay, event.timestamp, event.to_alliance_id, topX)
+      ) {
+        return false;
+      }
+    }
     if (!query.filters.includeInferred && event.inferred) {
       return false;
     }
@@ -721,6 +813,7 @@ async function ensureLoadedState(includeFlags: boolean): Promise<WorkerLoadedSta
     selectionCache.clear();
     pulseCache.clear();
     networkCache.clear();
+    topMembershipCache.clear();
   }
 
   if (includeFlags && loadedState && !loadedState.includeFlags) {

@@ -31,6 +31,7 @@ export type WorkerQueryState = {
     includeInferred: boolean;
     includeNoise: boolean;
     evidenceMode: WorkerEvidenceMode;
+    topXByScore: number | null;
     sizeByScore: boolean;
   };
   textQuery: string;
@@ -59,7 +60,7 @@ type LoaderWorkerPayload = {
   flagsRaw: unknown[];
   flagAssetsRaw: unknown | null;
   allianceFlagsRaw: unknown | null;
-  scoresRaw: unknown | null;
+  scoreRanksRaw: unknown | null;
   manifestRaw: unknown | null;
 };
 

@@ -86,18 +86,27 @@ export const manifestSchema = z.object({
 });
 
 const allianceScoreDaySchema = z.record(z.coerce.number());
+const allianceRankDaySchema = z.record(z.coerce.number().int().positive());
 
 export const allianceScoresDailySchema = z.object({
+  schema_version: z.coerce.number().int().positive().catch(1),
   scores_by_day: z.record(allianceScoreDaySchema)
 });
 
+export const allianceScoreRanksDailySchema = z.object({
+  schema_version: z.coerce.number().int().positive().catch(1),
+  ranks_by_day: z.record(allianceRankDaySchema)
+});
+
 export type AllianceScoresByDay = z.infer<typeof allianceScoresDailySchema>["scores_by_day"];
+export type AllianceScoreRanksByDay = z.infer<typeof allianceScoreRanksDailySchema>["ranks_by_day"];
 
 export type TimelapseEvent = z.infer<typeof timelapseEventSchema>;
 export type TimelapseSummary = z.infer<typeof summarySchema>;
 export type TimelapseManifest = z.infer<typeof manifestSchema>;
 export type TimelapseFlag = z.infer<typeof flagSchema>;
 export type AllianceScoresDaily = z.infer<typeof allianceScoresDailySchema>;
+export type AllianceScoreRanksDaily = z.infer<typeof allianceScoreRanksDailySchema>;
 export type AllianceFlagAction = z.infer<typeof allianceFlagActionSchema>;
 export type AllianceFlagEvent = z.infer<typeof allianceFlagEventSchema>;
 export type AllianceFlagsPayload = z.infer<typeof allianceFlagsPayloadSchema>;

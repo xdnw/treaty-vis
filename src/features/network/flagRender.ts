@@ -6,7 +6,8 @@ export const FLAG_MAX_SPRITES = 220;
 export const FLAG_PRESSURE_REFRESH_MS = 24;
 export const FLAG_PRESSURE_BUILD_MS = 28;
 
-export type FlagRenderMode = "off" | "full" | "focused-hover-only";
+export type FlagRenderMode = "off" | "full" | "bounded-full" | "focused-hover-only";
+export type FlagPressureLevel = "none" | "elevated" | "critical";
 
 export type AtlasSpriteLookup = {
   key: string;
@@ -18,21 +19,52 @@ export function deriveFlagRenderMode(
   hasFlagAssets: boolean,
   cameraRatio: number,
   nodeCount: number,
-  framePressure: boolean
+  framePressureLevel: FlagPressureLevel
 ): FlagRenderMode {
   if (!showFlags || !hasFlagAssets) {
     return "off";
   }
 
-  if (framePressure) {
+  if (framePressureLevel === "critical") {
     return "focused-hover-only";
   }
 
-  if (cameraRatio <= FLAG_FULL_MAX_CAMERA_RATIO && nodeCount <= FLAG_FULL_MAX_NODES) {
+  if (framePressureLevel === "none" && cameraRatio <= FLAG_FULL_MAX_CAMERA_RATIO && nodeCount <= FLAG_FULL_MAX_NODES) {
     return "full";
   }
 
-  return "focused-hover-only";
+  return "bounded-full";
+}
+
+function stableHashKey(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return hash >>> 0;
+}
+
+type ResolveSpriteOptions = {
+  visibleNodeIds?: ReadonlySet<string> | null;
+  importanceByNodeId?: ReadonlyMap<string, number> | Record<string, number> | null;
+};
+
+function resolveImportance(
+  importanceByNodeId: ReadonlyMap<string, number> | Record<string, number> | null | undefined,
+  nodeId: string
+): number {
+  if (!importanceByNodeId) {
+    return 0;
+  }
+  const mapLike = importanceByNodeId as ReadonlyMap<string, number>;
+  if (typeof mapLike.get === "function") {
+    const value = mapLike.get(nodeId);
+    return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  }
+  const recordLike = importanceByNodeId as Record<string, number>;
+  const value = recordLike[nodeId];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 export function resolveAtlasSprite(
@@ -54,22 +86,66 @@ export function resolveSpriteNodeIds(
   nodeIds: string[],
   focusedAllianceId: string | null,
   hoveredAllianceId: string | null,
-  spriteCap = FLAG_MAX_SPRITES
+  spriteCap = FLAG_MAX_SPRITES,
+  options?: ResolveSpriteOptions
 ): Set<string> {
   if (mode === "off") {
     return new Set();
   }
 
-  if (mode === "focused-hover-only") {
-    const ids = new Set<string>();
-    if (focusedAllianceId) {
-      ids.add(focusedAllianceId);
-    }
-    if (hoveredAllianceId) {
-      ids.add(hoveredAllianceId);
-    }
-    return ids;
+  const nodeIdSet = new Set(nodeIds);
+  const forcedIds: string[] = [];
+  if (focusedAllianceId && nodeIdSet.has(focusedAllianceId)) {
+    forcedIds.push(focusedAllianceId);
+  }
+  if (hoveredAllianceId && hoveredAllianceId !== focusedAllianceId && nodeIdSet.has(hoveredAllianceId)) {
+    forcedIds.push(hoveredAllianceId);
   }
 
-  return new Set(nodeIds.slice(0, Math.max(0, spriteCap)));
+  if (mode === "focused-hover-only") {
+    return new Set(forcedIds);
+  }
+
+  const cap = Math.max(0, spriteCap);
+  if (cap === 0) {
+    return new Set(forcedIds);
+  }
+
+  const visibleNodeIds = options?.visibleNodeIds ?? null;
+  const importanceByNodeId = options?.importanceByNodeId ?? null;
+  const selected = new Set<string>(forcedIds);
+  if (selected.size >= cap && forcedIds.length > 0) {
+    return selected;
+  }
+
+  const candidates = nodeIds
+    .filter((nodeId) => !selected.has(nodeId))
+    .map((nodeId) => ({
+      nodeId,
+      visibleRank: visibleNodeIds?.has(nodeId) ? 0 : 1,
+      importance: resolveImportance(importanceByNodeId, nodeId),
+      hash: stableHashKey(nodeId)
+    }));
+
+  candidates.sort((left, right) => {
+    if (left.visibleRank !== right.visibleRank) {
+      return left.visibleRank - right.visibleRank;
+    }
+    if (left.importance !== right.importance) {
+      return right.importance - left.importance;
+    }
+    if (left.hash !== right.hash) {
+      return left.hash - right.hash;
+    }
+    return left.nodeId.localeCompare(right.nodeId);
+  });
+
+  for (const candidate of candidates) {
+    if (selected.size >= cap) {
+      break;
+    }
+    selected.add(candidate.nodeId);
+  }
+
+  return selected;
 }

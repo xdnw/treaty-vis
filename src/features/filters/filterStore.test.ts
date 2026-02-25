@@ -15,6 +15,7 @@ function makeQuery(): QueryState {
       includeInferred: true,
       includeNoise: true,
       evidenceMode: "all",
+      topXByScore: null,
       sizeByScore: false,
       showFlags: false
     },

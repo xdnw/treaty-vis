@@ -14,6 +14,7 @@ export type QueryFilters = {
   includeInferred: boolean;
   includeNoise: boolean;
   evidenceMode: EvidenceMode;
+  topXByScore: number | null;
   sizeByScore: boolean;
   showFlags: boolean;
 };
@@ -66,6 +67,7 @@ type FilterStore = {
   setIncludeInferred: (value: boolean) => void;
   setIncludeNoise: (value: boolean) => void;
   setEvidenceMode: (mode: EvidenceMode) => void;
+  setTopXByScore: (value: number | null) => void;
   setSizeByScore: (value: boolean) => void;
   setShowFlags: (value: boolean) => void;
   clearFilters: () => void;
@@ -96,6 +98,7 @@ const defaultQueryState: QueryState = {
     includeInferred: true,
     includeNoise: true,
     evidenceMode: "all",
+    topXByScore: null,
     sizeByScore: false,
     showFlags: false
   },
@@ -134,6 +137,18 @@ function readNumberCsvParam(raw: string | null): number[] {
   return readCsvParam(raw)
     .map((item) => Number(item))
     .filter((value) => Number.isFinite(value));
+}
+
+function readPositiveNumberParam(raw: string | null): number | null {
+  if (!raw) {
+    return null;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  const normalized = Math.floor(parsed);
+  return normalized > 0 ? normalized : null;
 }
 
 export function deserializeQueryState(search: string): Partial<QueryState> {
@@ -188,6 +203,7 @@ export function deserializeQueryState(search: string): Partial<QueryState> {
       includeInferred: params.get("includeInferred") !== "0",
       includeNoise: params.get("includeNoise") !== "0",
       evidenceMode,
+      topXByScore: readPositiveNumberParam(params.get("topXByScore")),
       sizeByScore: params.get("sizeByScore") === "1",
       showFlags: params.get("showFlags") === "1"
     },
@@ -248,6 +264,9 @@ export function serializeQueryState(query: QueryState): string {
   }
   if (query.filters.evidenceMode !== "all") {
     params.set("evidence", query.filters.evidenceMode);
+  }
+  if (query.filters.topXByScore !== null && query.filters.topXByScore > 0) {
+    params.set("topXByScore", String(query.filters.topXByScore));
   }
   if (query.filters.sizeByScore) {
     params.set("sizeByScore", "1");
@@ -467,6 +486,18 @@ export const useFilterStore = create<FilterStore>((set) => ({
         filters: {
           ...state.query.filters,
           evidenceMode: mode
+        }
+      }
+    }));
+  },
+  setTopXByScore: (value) => {
+    const normalized = value !== null && Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
+    set((state) => ({
+      query: {
+        ...state.query,
+        filters: {
+          ...state.query.filters,
+          topXByScore: normalized
         }
       }
     }));

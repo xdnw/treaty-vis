@@ -3,6 +3,7 @@ import Graph from "graphology";
 import Sigma from "sigma";
 import type { AllianceFlagSnapshot, AllianceScoresByDay, FlagAssetsPayload, TimelapseEvent } from "@/domain/timelapse/schema";
 import { selectTimelapseNetworkEventIndexes } from "@/domain/timelapse/loader";
+import { resolveScoreDay } from "@/domain/timelapse/scoreDay";
 import { deriveNetworkEdges } from "@/domain/timelapse/selectors";
 import { type QueryState, useFilterStore } from "@/features/filters/filterStore";
 import { dampPosition, positionForNode, type Point } from "@/features/network/layout";
@@ -13,8 +14,10 @@ import {
   deriveFlagRenderMode,
   resolveAtlasSprite,
   resolveSpriteNodeIds,
+  type FlagPressureLevel,
   type FlagRenderMode
 } from "@/features/network/flagRender";
+import { buildHoverResetKey, derivePressureLevel } from "@/features/network/networkViewPolicy";
 import { markTimelapsePerf } from "@/lib/perf";
 
 const TREATY_EDGE_COLORS: Record<string, string> = {
@@ -22,7 +25,7 @@ const TREATY_EDGE_COLORS: Record<string, string> = {
   ODP: "#5f3dc4",
   NAP: "#2b8a3e",
   PIAT: "#364fc7",
-  protectorate: "#d9480f"
+  PROTECTORATE: "#d9480f"
 };
 
 const LABEL_TEXT_COLOR = "#1f2937";
@@ -34,8 +37,42 @@ const ZOOM_BAND_ZOOMED_IN_MAX_RATIO = 1.25;
 const ZOOM_BAND_MID_MAX_RATIO = 2.35;
 const FLAG_SIZE_TO_NODE_RATIO = 1.45;
 const FLAG_MIN_DRAW_SIZE = 10;
-const FLAG_PRESSURE_SCORE_TRIGGER = 3;
-const FLAG_PRESSURE_SCORE_RECOVER = 0;
+
+type NetworkFlagDiagnosticSample = {
+  stage: "graph-build" | "refresh";
+  ts: number;
+  cameraRatio: number;
+  nodeCount: number;
+  framePressureScore: number;
+  framePressure: boolean;
+  framePressureLevel: FlagPressureLevel;
+  mode: FlagRenderMode;
+  spriteCandidateCount: number;
+  refreshMs?: number;
+  graphBuildMs?: number;
+};
+
+function pushNetworkFlagDiagnostic(sample: NetworkFlagDiagnosticSample): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const perfWindow = window as Window & {
+    __timelapsePerf?: { enabled?: boolean };
+    __networkFlagDiagnostics?: NetworkFlagDiagnosticSample[];
+  };
+
+  if (!perfWindow.__timelapsePerf?.enabled) {
+    return;
+  }
+
+  const entries = perfWindow.__networkFlagDiagnostics ?? [];
+  entries.push(sample);
+  if (entries.length > 240) {
+    entries.splice(0, entries.length - 240);
+  }
+  perfWindow.__networkFlagDiagnostics = entries;
+}
 
 type ZoomBand = "zoomed-out" | "mid" | "zoomed-in";
 
@@ -49,7 +86,7 @@ const EDGE_LEGEND_ITEMS: EdgeLegendItem[] = [
   ...Object.entries(TREATY_EDGE_COLORS).map(([key, color]) => ({
     key,
     color,
-    label: key === "protectorate" ? "Protectorate" : key
+    label: key === "PROTECTORATE" ? "Protectorate" : key
   })),
   {
     key: "unknown",
@@ -69,6 +106,7 @@ type Props = {
   showFlags: boolean;
   flagAssetsPayload: FlagAssetsPayload | null;
   allianceScoresByDay: AllianceScoresByDay | null;
+  allianceScoreDays: string[];
   resolveAllianceFlagAtPlayhead: (allianceId: number, playhead: string | null) => AllianceFlagSnapshot | null;
   onFocusAlliance: (allianceId: number | null) => void;
   onFocusEdge: (edgeKey: string | null) => void;
@@ -84,6 +122,25 @@ function clampRadius(value: number): number {
   return Math.max(MIN_NODE_RADIUS, Math.min(MAX_NODE_RADIUS, value));
 }
 
+function canonicalTreatyTypeKey(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+function colorWithOpacity(hexColor: string, opacity: number): string {
+  const boundedOpacity = Math.max(0, Math.min(1, opacity));
+  const raw = hexColor.trim();
+  const sixDigitHex = raw.length === 4 ? `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}` : raw;
+  const match = /^#([0-9a-fA-F]{6})$/.exec(sixDigitHex);
+  if (!match) {
+    return hexColor;
+  }
+  const hex = match[1];
+  const red = parseInt(hex.slice(0, 2), 16);
+  const green = parseInt(hex.slice(2, 4), 16);
+  const blue = parseInt(hex.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${boundedOpacity})`;
+}
+
 function degreeRadius(degree: number): number {
   return clampRadius(3 + Math.log2(degree + 1) * 1.2);
 }
@@ -94,33 +151,6 @@ function scoreRadius(score: number, maxScore: number): number {
   }
   const normalized = Math.sqrt(score / maxScore);
   return clampRadius(MIN_NODE_RADIUS + normalized * (MAX_NODE_RADIUS - MIN_NODE_RADIUS));
-}
-
-function resolveScoreDay(scoreDays: string[], playhead: string | null): string | null {
-  if (scoreDays.length === 0) {
-    return null;
-  }
-  if (!playhead) {
-    return scoreDays[scoreDays.length - 1] ?? null;
-  }
-
-  const targetDay = playhead.slice(0, 10);
-  let lo = 0;
-  let hi = scoreDays.length - 1;
-  let best = -1;
-  while (lo <= hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    if (scoreDays[mid] <= targetDay) {
-      best = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  if (best >= 0) {
-    return scoreDays[best] ?? null;
-  }
-  return scoreDays[0] ?? null;
 }
 
 function deriveZoomBand(cameraRatio: number): ZoomBand {
@@ -266,6 +296,7 @@ export function NetworkView({
   showFlags,
   flagAssetsPayload,
   allianceScoresByDay,
+  allianceScoreDays,
   resolveAllianceFlagAtPlayhead,
   onFocusAlliance,
   onFocusEdge
@@ -280,17 +311,18 @@ export function NetworkView({
   const spriteLayerRef = useRef<HTMLCanvasElement | null>(null);
   const atlasImageRef = useRef<HTMLImageElement | null>(null);
   const framePressureScoreRef = useRef(0);
-  const framePressureRef = useRef(false);
+  const framePressureLevelRef = useRef<FlagPressureLevel>("none");
   const flagDrawMsRef = useRef(0);
   const showFlagsRef = useRef(showFlags);
   const flagAssetsRef = useRef<FlagAssetsPayload | null>(flagAssetsPayload);
+  const visibleNodeIdsRef = useRef<Set<string>>(new Set());
   const [size, setSize] = useState({ width: 1000, height: 350 });
   const [hovered, setHovered] = useState<HoverPayload | null>(null);
   const [budgetPreset, setBudgetPreset] = useState<"auto" | "500" | "1000" | "2000" | "unlimited">("auto");
   const [cameraRatio, setCameraRatio] = useState(1);
   const [perf, setPerf] = useState<GraphPerfState>({ graphBuildMs: 0, refreshMs: 0, flagDrawMs: 0 });
   const [atlasReady, setAtlasReady] = useState(false);
-  const [framePressure, setFramePressure] = useState(false);
+  const [framePressureLevel, setFramePressureLevel] = useState<FlagPressureLevel>("none");
   const [workerEdgeEventIndexes, setWorkerEdgeEventIndexes] = useState<number[] | null>(null);
   const networkRequestRef = useRef(0);
   const previousPositionsRef = useRef<Map<string, Point>>(new Map());
@@ -310,8 +342,8 @@ export function NetworkView({
   const zoomBand = useMemo(() => deriveZoomBand(cameraRatio), [cameraRatio]);
 
   useEffect(() => {
-    framePressureRef.current = framePressure;
-  }, [framePressure]);
+    framePressureLevelRef.current = framePressureLevel;
+  }, [framePressureLevel]);
 
   useEffect(() => {
     showFlagsRef.current = showFlags;
@@ -465,29 +497,13 @@ export function NetworkView({
   }, [allEvents, allianceNameById, maxEdges, playhead, scopedIndexes, workerEdgeEventIndexes]);
 
   const hoverResetKey = useMemo(() => {
-    const scopedFingerprint =
-      scopedIndexes.length > 0
-        ? `${scopedIndexes.length}:${scopedIndexes[0] ?? ""}:${scopedIndexes[scopedIndexes.length - 1] ?? ""}`
-        : "0";
-    return [
-      playhead ?? "",
-      baseQuery.time.start ?? "",
-      baseQuery.time.end ?? "",
-      [...baseQuery.filters.alliances].sort((left, right) => left - right).join(","),
-      [...baseQuery.filters.treatyTypes].sort((left, right) => left.localeCompare(right)).join(","),
-      [...baseQuery.filters.actions].sort((left, right) => left.localeCompare(right)).join(","),
-      [...baseQuery.filters.sources].sort((left, right) => left.localeCompare(right)).join(","),
-      baseQuery.filters.includeInferred ? "1" : "0",
-      baseQuery.filters.includeNoise ? "1" : "0",
-      baseQuery.filters.evidenceMode,
-      sizeByScore ? "1" : "0",
-      baseQuery.textQuery.trim().toLowerCase(),
-      baseQuery.sort.field,
-      baseQuery.sort.direction,
-      String(maxEdges),
-      String(allEvents.length),
-      scopedFingerprint
-    ].join("|");
+    return buildHoverResetKey(baseQuery, {
+      sizeByScore,
+      maxEdges,
+      allEventsLength: allEvents.length,
+      scopedIndexes,
+      playhead
+    });
   }, [
     allEvents.length,
     baseQuery.filters.actions,
@@ -570,10 +586,9 @@ export function NetworkView({
       flagAssetsPayload !== null,
       cameraRatio,
       nodeIds.length,
-      framePressure
+      framePressureLevel
     );
-    const scoreDays = allianceScoresByDay ? Object.keys(allianceScoresByDay).sort((a, b) => a.localeCompare(b)) : [];
-    const scoreDay = sizeByScore ? resolveScoreDay(scoreDays, playhead) : null;
+    const scoreDay = sizeByScore ? resolveScoreDay(allianceScoreDays, playhead) : null;
     const dayScores = scoreDay && allianceScoresByDay ? allianceScoresByDay[scoreDay] ?? null : null;
 
     const scoreByNode = new Map<string, number>();
@@ -592,12 +607,24 @@ export function NetworkView({
     }
     const useScoreSizing = Boolean(sizeByScore && dayScores && maxVisibleScore > 0);
 
+    const flagImportanceByNodeId = new Map<string, number>();
+    for (const nodeId of nodeIds) {
+      const degree = nodeMetaById.get(nodeId)?.degree ?? 0;
+      const score = scoreByNode.get(nodeId) ?? 0;
+      // Weighted score keeps high-signal alliances favored while preserving deterministic fallback.
+      flagImportanceByNodeId.set(nodeId, degree * 1_000 + score);
+    }
+
     const flagResolutionNodeIds = resolveSpriteNodeIds(
       flagRenderMode,
       nodeIds,
       focusedAlliance,
       hovered?.allianceId ?? null,
-      FLAG_MAX_SPRITES
+      FLAG_MAX_SPRITES,
+      {
+        visibleNodeIds: visibleNodeIdsRef.current,
+        importanceByNodeId: flagImportanceByNodeId
+      }
     );
 
     const previousPositions = previousPositionsRef.current;
@@ -667,7 +694,8 @@ export function NetworkView({
     previousPositionsRef.current = nextPositions;
 
     const links: EdgePayload[] = edges.map((edge) => {
-      const color = TREATY_EDGE_COLORS[edge.treatyType] ?? EDGE_FALLBACK_COLOR;
+      const treatyType = canonicalTreatyTypeKey(edge.treatyType);
+      const color = TREATY_EDGE_COLORS[treatyType] ?? EDGE_FALLBACK_COLOR;
       const highlighted = focusedEdgeKey !== null && focusedEdgeKey === edge.key;
       const linkedToFocusedAlliance =
         focusedAlliance !== null && (edge.sourceId === focusedAlliance || edge.targetId === focusedAlliance);
@@ -678,7 +706,7 @@ export function NetworkView({
         edgeKey: edge.key,
         sourceLabel: edge.sourceLabel,
         targetLabel: edge.targetLabel,
-        treatyType: edge.treatyType,
+        treatyType,
         sourceType: edge.sourceType,
         confidence: edge.confidence,
         color,
@@ -707,11 +735,12 @@ export function NetworkView({
     adaptiveBudget,
     allianceNameById,
     allianceScoresByDay,
+    allianceScoreDays,
     anchoredAllianceIdLookup,
     budgetPreset,
     cameraRatio,
     edges,
-    framePressure,
+    framePressureLevel,
     flagAssetsPayload,
     focusedAllianceId,
     focusedEdgeKey,
@@ -726,8 +755,20 @@ export function NetworkView({
 
   useEffect(() => {
     markTimelapsePerf("network.graph.build", graph.graphBuildMs);
+    pushNetworkFlagDiagnostic({
+      stage: "graph-build",
+      ts: Date.now(),
+      cameraRatio,
+      nodeCount: graph.nodes.length,
+      framePressureScore: framePressureScoreRef.current,
+      framePressure: framePressureLevel !== "none",
+      framePressureLevel,
+      mode: graph.flagRenderMode,
+      spriteCandidateCount: graph.flagResolvedNodeCount,
+      graphBuildMs: Number(graph.graphBuildMs.toFixed(2))
+    });
     setPerf((current) => ({ ...current, graphBuildMs: Number(graph.graphBuildMs.toFixed(2)) }));
-  }, [graph.graphBuildMs]);
+  }, [cameraRatio, framePressureLevel, graph.flagRenderMode, graph.flagResolvedNodeCount, graph.graphBuildMs, graph.nodes.length]);
 
   useEffect(() => {
     if (!hovered) {
@@ -817,18 +858,17 @@ export function NetworkView({
 
       const drawStartedAt = performance.now();
       let drawn = 0;
+      const visibleNodeIds = new Set<string>();
       for (const nodeId of graphModel.nodes()) {
-        if (drawn >= FLAG_MAX_SPRITES) {
-          break;
-        }
-
         const sprite = graphModel.getNodeAttribute(nodeId, "flagSprite") as { x: number; y: number; w: number; h: number } | null;
-        if (!sprite) {
+        const display = renderer.getNodeDisplayData(nodeId);
+        if (!display || display.hidden) {
           continue;
         }
 
-        const display = renderer.getNodeDisplayData(nodeId);
-        if (!display || display.hidden) {
+        visibleNodeIds.add(nodeId);
+
+        if (drawn >= FLAG_MAX_SPRITES || !sprite) {
           continue;
         }
 
@@ -841,6 +881,8 @@ export function NetworkView({
         ctx.drawImage(atlas, sprite.x, sprite.y, sprite.w, sprite.h, drawX, drawY, drawSize, drawSize);
         drawn += 1;
       }
+
+      visibleNodeIdsRef.current = visibleNodeIds;
 
       const drawMs = performance.now() - drawStartedAt;
       flagDrawMsRef.current = Number(drawMs.toFixed(2));
@@ -980,9 +1022,11 @@ export function NetworkView({
       if (!graphModel.hasNode(edge.source) || !graphModel.hasNode(edge.target)) {
         continue;
       }
+      const edgeOpacity = edge.highlighted ? 0.95 : edge.adjacentToFocusedAlliance ? 0.82 : 0.5;
       graphModel.addDirectedEdgeWithKey(edge.id, edge.source, edge.target, {
-        size: edge.highlighted ? 3 : 1.2,
-        color: edge.highlighted || edge.adjacentToFocusedAlliance ? edge.color : "#c7cfdd",
+        size: edge.highlighted ? 3.2 : edge.adjacentToFocusedAlliance ? 2 : 1.2,
+        color: colorWithOpacity(edge.color, edgeOpacity),
+        zIndex: edge.highlighted ? 3 : edge.adjacentToFocusedAlliance ? 2 : 1,
         edgeKey: edge.edgeKey,
         sourceLabel: edge.sourceLabel,
         targetLabel: edge.targetLabel,
@@ -999,20 +1043,33 @@ export function NetworkView({
 
     const overBudget = refreshMs > FLAG_PRESSURE_REFRESH_MS || graph.graphBuildMs > FLAG_PRESSURE_BUILD_MS;
     framePressureScoreRef.current += overBudget ? 1 : -1;
-    framePressureScoreRef.current = Math.max(-8, Math.min(8, framePressureScoreRef.current));
+    framePressureScoreRef.current = Math.max(-12, Math.min(12, framePressureScoreRef.current));
 
-    if (!framePressureRef.current && framePressureScoreRef.current >= FLAG_PRESSURE_SCORE_TRIGGER) {
-      setFramePressure(true);
-    } else if (framePressureRef.current && framePressureScoreRef.current <= FLAG_PRESSURE_SCORE_RECOVER) {
-      setFramePressure(false);
+    const nextPressureLevel = derivePressureLevel(framePressureScoreRef.current, framePressureLevelRef.current);
+    if (nextPressureLevel !== framePressureLevelRef.current) {
+      setFramePressureLevel(nextPressureLevel);
     }
+
+    pushNetworkFlagDiagnostic({
+      stage: "refresh",
+      ts: Date.now(),
+      cameraRatio,
+      nodeCount: graph.nodes.length,
+      framePressureScore: framePressureScoreRef.current,
+      framePressure: nextPressureLevel !== "none",
+      framePressureLevel: nextPressureLevel,
+      mode: graph.flagRenderMode,
+      spriteCandidateCount: graph.flagResolvedNodeCount,
+      refreshMs: Number(refreshMs.toFixed(2)),
+      graphBuildMs: Number(graph.graphBuildMs.toFixed(2))
+    });
 
     setPerf((current) => ({
       ...current,
       refreshMs: Number(refreshMs.toFixed(2)),
       flagDrawMs: Number(flagDrawMsRef.current.toFixed(2))
     }));
-  }, [graph.flagRenderMode, graph.graphBuildMs, graph.links, graph.nodes]);
+  }, [cameraRatio, graph.flagRenderMode, graph.flagResolvedNodeCount, graph.graphBuildMs, graph.links, graph.nodes]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
@@ -1094,7 +1151,7 @@ export function NetworkView({
         Labels: {zoomBand} | Flags: {graph.flagRenderMode} | camera ratio: {cameraRatio.toFixed(2)} | resolved sprites: {graph.flagResolvedNodeCount}
       </div>
       <div className="mb-2 text-[11px] text-muted">
-        Perf: build {perf.graphBuildMs.toFixed(2)} ms | refresh {perf.refreshMs.toFixed(2)} ms | sprite draw {perf.flagDrawMs.toFixed(2)} ms | pressure {framePressure ? "on" : "off"}
+        Perf: build {perf.graphBuildMs.toFixed(2)} ms | refresh {perf.refreshMs.toFixed(2)} ms | sprite draw {perf.flagDrawMs.toFixed(2)} ms | pressure {framePressureLevel}
       </div>
       <div ref={hostRef} className="h-[350px] overflow-hidden rounded-xl border border-slate-200" />
       {hoveredAlliance ? (

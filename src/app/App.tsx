@@ -1,12 +1,13 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  loadAllianceScoresByDay,
   loadTimelapseBundle,
   resolveAllianceFlagSnapshot,
   selectTimelapseIndexes,
   selectTimelapsePulse,
   type TimelapseDataBundle
 } from "@/domain/timelapse/loader";
-import type { AllianceFlagSnapshot } from "@/domain/timelapse/schema";
+import type { AllianceFlagSnapshot, AllianceScoresByDay } from "@/domain/timelapse/schema";
 import { buildPulseSeries, countByAction, selectEvents, type PulsePoint } from "@/domain/timelapse/selectors";
 import {
   deserializeQueryState,
@@ -48,6 +49,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [workerScopedIndexes, setWorkerScopedIndexes] = useState<number[] | null>(null);
   const [workerPulse, setWorkerPulse] = useState<PulsePoint[] | null>(null);
+  const [allianceScoresByDay, setAllianceScoresByDay] = useState<AllianceScoresByDay | null>(null);
+  const [scoreLoadAttempted, setScoreLoadAttempted] = useState(false);
   const urlSyncTimerRef = useRef<number | null>(null);
   const selectionRequestRef = useRef(0);
   const pulseRequestRef = useRef(0);
@@ -63,6 +66,7 @@ export function App() {
   const setTimeRange = useFilterStore((state) => state.setTimeRange);
   const setPlayhead = useFilterStore((state) => state.setPlayhead);
   const setPlaying = useFilterStore((state) => state.setPlaying);
+  const setSizeByScore = useFilterStore((state) => state.setSizeByScore);
   const setFocus = useFilterStore((state) => state.setFocus);
   const clearFocus = useFilterStore((state) => state.clearFocus);
   const resetAll = useFilterStore((state) => state.resetAll);
@@ -173,7 +177,8 @@ export function App() {
             alliances: [],
             minTimestamp: null,
             maxTimestamp: null
-          }
+          },
+          allianceScoreRanksByDay: null
         };
       }
 
@@ -186,11 +191,66 @@ export function App() {
       return {
         datasetKey,
         events: bundle.events,
-        indices: bundle.indices
+        indices: bundle.indices,
+        allianceScoreRanksByDay: bundle.allianceScoreRanksByDay
       };
     },
     [bundle]
   );
+
+  const scoreFileDeclared = Boolean(bundle?.manifest?.files?.["alliance_scores_daily.msgpack"]);
+
+  useEffect(() => {
+    if (!bundle) {
+      return;
+    }
+
+    if (!scoreFileDeclared && hasScoreRankData) {
+      console.warn(
+        "[timelapse] Score sizing disabled: manifest missing 'alliance_scores_daily.msgpack'. " +
+          "Run 'npm run data:sync' after generating score artifacts."
+      );
+    }
+  }, [bundle, hasScoreRankData, scoreFileDeclared]);
+
+  useEffect(() => {
+    if (!bundle) {
+      return;
+    }
+
+    if (query.filters.sizeByScore && !scoreFileDeclared && allianceScoresByDay === null && !scoreLoadAttempted) {
+      console.warn(
+        "[timelapse] Ignoring 'sizeByScore=1' because manifest does not declare 'alliance_scores_daily.msgpack'."
+      );
+      setSizeByScore(false);
+      setScoreLoadAttempted(true);
+      return;
+    }
+
+    if (!query.filters.sizeByScore || allianceScoresByDay !== null || scoreLoadAttempted || !scoreFileDeclared) {
+      return;
+    }
+
+    let mounted = true;
+    setScoreLoadAttempted(true);
+    void loadAllianceScoresByDay().then((scores) => {
+      if (!mounted) {
+        return;
+      }
+      if (!scores) {
+        console.warn(
+          "[timelapse] Failed to load '/data/alliance_scores_daily.msgpack'. Score sizing has been disabled."
+        );
+        setSizeByScore(false);
+        return;
+      }
+      setAllianceScoresByDay(scores);
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [allianceScoresByDay, bundle, query.filters.sizeByScore, scoreFileDeclared, scoreLoadAttempted, setSizeByScore]);
 
   useEffect(() => {
     if (!bundle) {
@@ -317,12 +377,21 @@ export function App() {
     [bundle?.events, scopedSelectionIndexes, workerPulse]
   );
 
-  const hasScoreData = useMemo(() => {
-    if (!bundle?.allianceScoresByDay) {
+  const hasScoreRankData = useMemo(() => {
+    if (!bundle?.allianceScoreRanksByDay) {
       return false;
     }
-    return Object.keys(bundle.allianceScoresByDay).length > 0;
-  }, [bundle?.allianceScoresByDay]);
+    return Object.keys(bundle.allianceScoreRanksByDay).length > 0;
+  }, [bundle?.allianceScoreRanksByDay]);
+
+  const hasScoreData = Boolean(
+    (allianceScoresByDay && Object.keys(allianceScoresByDay).length > 0) ||
+      (scoreFileDeclared && !scoreLoadAttempted)
+  );
+  const allianceScoreDays = useMemo(
+    () => (allianceScoresByDay ? Object.keys(allianceScoresByDay).sort((left, right) => left.localeCompare(right)) : []),
+    [allianceScoresByDay]
+  );
 
   const resolveAllianceFlagAtPlayhead = useMemo(
     () => (allianceId: number, playhead: string | null): AllianceFlagSnapshot | null => {
@@ -475,7 +544,12 @@ export function App() {
         </div>
       </section>
 
-      <FilterBar indices={bundle.indices} timelineTicks={timelineTicks} hasScoreData={hasScoreData} />
+      <FilterBar
+        indices={bundle.indices}
+        timelineTicks={timelineTicks}
+        hasScoreData={hasScoreData}
+        hasScoreRankData={hasScoreRankData}
+      />
 
       <section className="grid gap-4 xl:grid-cols-2">
         <Suspense fallback={<section className="panel p-4 text-sm text-muted">Loading timeline view...</section>}>
@@ -498,7 +572,8 @@ export function App() {
             sizeByScore={query.filters.sizeByScore}
             showFlags={showFlags}
             flagAssetsPayload={bundle.flagAssetsPayload}
-            allianceScoresByDay={bundle.allianceScoresByDay}
+            allianceScoresByDay={allianceScoresByDay}
+            allianceScoreDays={allianceScoreDays}
             resolveAllianceFlagAtPlayhead={resolveAllianceFlagAtPlayhead}
             onFocusAlliance={(allianceId) => setFocus({ allianceId, edgeKey: null, eventId: null })}
             onFocusEdge={(edgeKey) => setFocus({ edgeKey, eventId: null })}

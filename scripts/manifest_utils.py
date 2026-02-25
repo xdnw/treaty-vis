@@ -8,7 +8,7 @@ from pathlib import Path
 from script_paths import WEB_PUBLIC_DATA_DIR
 
 
-WEB_MANIFEST_FILES = [
+WEB_MANIFEST_REQUIRED_FILES = [
 	"treaty_changes_reconciled.msgpack",
 	"treaty_changes_reconciled_summary.msgpack",
 	"treaty_changes_reconciled_flags.msgpack",
@@ -16,6 +16,10 @@ WEB_MANIFEST_FILES = [
 	"flag_assets.msgpack",
 	"flag_atlas.webp",
 	"flag_atlas.png",
+	"alliance_score_ranks_daily.msgpack",
+]
+
+WEB_MANIFEST_OPTIONAL_FILES = [
 	"alliance_scores_daily.msgpack",
 ]
 
@@ -28,8 +32,13 @@ def _canonical_json(value: object) -> str:
 	return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def refresh_manifest(data_dir: Path = WEB_PUBLIC_DATA_DIR, required_files: list[str] | None = None) -> dict:
-	required = required_files or WEB_MANIFEST_FILES
+def refresh_manifest(
+	data_dir: Path = WEB_PUBLIC_DATA_DIR,
+	required_files: list[str] | None = None,
+	optional_files: list[str] | None = None,
+) -> dict:
+	required = required_files or WEB_MANIFEST_REQUIRED_FILES
+	optional = optional_files or WEB_MANIFEST_OPTIONAL_FILES
 	data_dir.mkdir(parents=True, exist_ok=True)
 
 	files_section: dict[str, dict[str, int | str]] = {}
@@ -37,6 +46,16 @@ def refresh_manifest(data_dir: Path = WEB_PUBLIC_DATA_DIR, required_files: list[
 		path = data_dir / name
 		if not path.exists():
 			raise FileNotFoundError(f"Cannot build manifest; missing required file: {path}")
+		stat = path.stat()
+		files_section[name] = {
+			"sizeBytes": int(stat.st_size),
+			"sha256": _sha256_file(path),
+		}
+
+	for name in optional:
+		path = data_dir / name
+		if not path.exists():
+			continue
 		stat = path.stat()
 		files_section[name] = {
 			"sizeBytes": int(stat.st_size),
