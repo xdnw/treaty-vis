@@ -5,5 +5,4 @@
 /node_modules
 /scripts/__pycache__
 /dist
-/data
 /vite.config.js

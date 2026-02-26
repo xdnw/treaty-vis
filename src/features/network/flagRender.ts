@@ -81,6 +81,19 @@ export function resolveAtlasSprite(
   return { key: flagKey, asset };
 }
 
+export function deriveFlagSpriteCapFromLodBudget(maxEdges: number): number {
+  if (!Number.isFinite(maxEdges)) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  const normalized = Math.floor(maxEdges);
+  if (normalized <= 0) {
+    return 0;
+  }
+
+  return normalized;
+}
+
 export function resolveSpriteNodeIds(
   mode: FlagRenderMode,
   nodeIds: string[],

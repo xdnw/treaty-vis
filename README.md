@@ -82,15 +82,6 @@ To run against local files only, pass `--skip-alliance-download --alliances-dir 
 - Additional guardrails: `docs/performance-budget.md`.
 - Key network metrics to track: `network.worker.turnaround`, `network.graph.build`, `network.graph.apply.diff`, `network.renderer.refresh`.
 
-## Network Layout
-
-- Canonical layout is worker-driven and deterministic: connected components, bounded communities, and per-node targets.
-- Worker output is the single source of truth for component/community/node targets used by the UI apply path.
-- UI applies damping and displacement clamps (`6` default, `12` during one-shot relax) to reduce churn across neighboring playheads.
-- Graph updates use incremental node/edge diffs instead of full clear-and-rebuild to avoid playback freezes.
-- `Re-pack / Relax` remains a bounded one-shot refinement over canonical worker targets.
-- Policy caps live in `src/features/network/networkViewPolicy.ts`.
-
 ## Data Files Expected
 
 Primary artifacts in `public/data/`:

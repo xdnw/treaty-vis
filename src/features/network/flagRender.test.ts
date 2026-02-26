@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  deriveFlagSpriteCapFromLodBudget,
   deriveFlagRenderMode,
   resolveAtlasSprite,
   resolveSpriteNodeIds
@@ -112,5 +113,17 @@ describe("flagRender helpers", () => {
     expect(sprite?.key).toBe("alpha");
     expect(sprite?.asset).toEqual(ASSETS.assets.alpha);
     expect(resolveAtlasSprite(ASSETS, "missing")).toBeNull();
+  });
+
+  it("derives sprite cap from finite LOD budgets", () => {
+    expect(deriveFlagSpriteCapFromLodBudget(500)).toBe(500);
+    expect(deriveFlagSpriteCapFromLodBudget(999.9)).toBe(999);
+    expect(deriveFlagSpriteCapFromLodBudget(0)).toBe(0);
+    expect(deriveFlagSpriteCapFromLodBudget(-4)).toBe(0);
+  });
+
+  it("treats non-finite LOD budget as uncapped", () => {
+    expect(deriveFlagSpriteCapFromLodBudget(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
+    expect(deriveFlagSpriteCapFromLodBudget(Number.POSITIVE_INFINITY)).toBe(Number.MAX_SAFE_INTEGER);
   });
 });

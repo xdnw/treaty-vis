@@ -1,0 +1,709 @@
+[
+  {
+    "timestamp": "2025-01-01T05:24:38.556000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed ODOAP | rank #152\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+    "source_message_json": {
+      "id": "1323884572022411265",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T05:24:38.556000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed PROTECTORATE | rank\n#43**\nTime remaining: <t:1741190400:R> (762 turns)\nFrom: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\nTo: [Anti-Horridism Obocchama Kun](<https://politicsandwar.com/alliance/id=10455>) - #163 (1 nations)\n**Signed ODOAP | rank #152**\nTime remaining: Permanent (Permanent)\nFrom: [European Coal And Steel Coalition](<https://politicsandwar.com/alliance/id=13486>) - #220 (2 nations)\nTo: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\n**Signed ODP | rank #29**\nTime remaining: <t:1736301600:R> (83 turns)\nFrom: [The Republic of Libertas](<https://politicsandwar.com/alliance/id=11009>) - #29 (44 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed EXTENSION | rank #38**\nTime remaining: <t:1740182400:R> (622 turns)\nFrom: [Darkstar](<https://politicsandwar.com/alliance/id=10259>) - #38 (43 nations)\nTo: [The house](<https://politicsandwar.com/alliance/id=12985>) - #79 (10 nations)\n**Signed PROTECTORATE | rank #11**\nTime remaining: Permanent (Permanent)\nFrom: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #11 (71 nations)\nTo: [The Aegis Order](<https://politicsandwar.com/alliance/id=9445>) - #47 (28 nations)\n**Signed EXTENSION | rank #14**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (66 nations)\nTo: [General Area of Three Ostritches](<https://politicsandwar.com/alliance/id=13311>) - #141 (1 nations)\n**Signed EXTENSION | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Banana Stand](<https://politicsandwar.com/alliance/id=7000>) - #88 (2 nations)\n**Signed ODOAP | rank #152**\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T05:19:25.176000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed ODOAP | rank #152\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+    "source_message_json": {
+      "id": "1323883257611292713",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T05:19:25.176000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed PROTECTORATE | rank\n#43**\nTime remaining: <t:1741190400:R> (762 turns)\nFrom: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\nTo: [Anti-Horridism Obocchama Kun](<https://politicsandwar.com/alliance/id=10455>) - #163 (1 nations)\n**Signed ODOAP | rank #152**\nTime remaining: Permanent (Permanent)\nFrom: [European Coal And Steel Coalition](<https://politicsandwar.com/alliance/id=13486>) - #220 (2 nations)\nTo: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\n**Signed ODP | rank #29**\nTime remaining: <t:1736301600:R> (83 turns)\nFrom: [The Republic of Libertas](<https://politicsandwar.com/alliance/id=11009>) - #29 (44 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed EXTENSION | rank #38**\nTime remaining: <t:1740182400:R> (622 turns)\nFrom: [Darkstar](<https://politicsandwar.com/alliance/id=10259>) - #38 (43 nations)\nTo: [The house](<https://politicsandwar.com/alliance/id=12985>) - #79 (10 nations)\n**Signed PROTECTORATE | rank #11**\nTime remaining: Permanent (Permanent)\nFrom: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #11 (71 nations)\nTo: [The Aegis Order](<https://politicsandwar.com/alliance/id=9445>) - #47 (28 nations)\n**Signed EXTENSION | rank #14**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (66 nations)\nTo: [General Area of Three Ostritches](<https://politicsandwar.com/alliance/id=13311>) - #141 (1 nations)\n**Signed EXTENSION | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Banana Stand](<https://politicsandwar.com/alliance/id=7000>) - #88 (2 nations)\n**Signed ODOAP | rank #152**\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T05:14:11.230000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed ODOAP | rank #152\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+    "source_message_json": {
+      "id": "1323881940826329088",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T05:14:11.230000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed PROTECTORATE | rank\n#43**\nTime remaining: <t:1741190400:R> (762 turns)\nFrom: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\nTo: [Anti-Horridism Obocchama Kun](<https://politicsandwar.com/alliance/id=10455>) - #163 (1 nations)\n**Signed ODOAP | rank #152**\nTime remaining: Permanent (Permanent)\nFrom: [European Coal And Steel Coalition](<https://politicsandwar.com/alliance/id=13486>) - #220 (2 nations)\nTo: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\n**Signed ODP | rank #29**\nTime remaining: <t:1736301600:R> (83 turns)\nFrom: [The Republic of Libertas](<https://politicsandwar.com/alliance/id=11009>) - #29 (44 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed EXTENSION | rank #38**\nTime remaining: <t:1740182400:R> (622 turns)\nFrom: [Darkstar](<https://politicsandwar.com/alliance/id=10259>) - #38 (43 nations)\nTo: [The house](<https://politicsandwar.com/alliance/id=12985>) - #79 (10 nations)\n**Signed PROTECTORATE | rank #11**\nTime remaining: Permanent (Permanent)\nFrom: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #11 (71 nations)\nTo: [The Aegis Order](<https://politicsandwar.com/alliance/id=9445>) - #47 (28 nations)\n**Signed EXTENSION | rank #14**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [General Area of Three Ostritches](<https://politicsandwar.com/alliance/id=13311>) - #141 (1 nations)\n**Signed EXTENSION | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Banana Stand](<https://politicsandwar.com/alliance/id=7000>) - #88 (2 nations)\n**Signed ODOAP | rank #152**\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T05:10:57.518000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed PROTECTORATE | rank #53\nTime remaining: <t:1740564000:R> (675 turns)\nFrom: [-Yorkshire-](<https://politicsandwar.com/alliance/id=10377>) - #53 (18 nations)\nTo:",
+    "source_message_json": {
+      "id": "1323881128339308626",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T05:10:57.518000+00:00",
+      "edited_timestamp": null,
+      "content": "Brotherhood](<https://politicsandwar.com/alliance/id=12097>) - #131 (1 nations)\n**Signed MDOAP | rank #22**\nTime remaining: <t:1739404800:R> (514 turns)\nFrom: [House Stark](<https://politicsandwar.com/alliance/id=3683>) - #22 (40 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed ODOAP | rank #98**\nTime remaining: <t:1743444000:R> (1075 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Agora](<https://politicsandwar.com/alliance/id=12705>) - #98 (6 nations)\n**Signed PIAT | rank #166**\nTime remaining: Permanent (Permanent)\nFrom: [The United Nations](<https://politicsandwar.com/alliance/id=13485>) - #166 (5 nations)\nTo: [The Freedom Arc](<https://politicsandwar.com/alliance/id=13427>) - #207 (3 nations)\n**Signed EXTENSION | rank #58**\nTime remaining: Permanent (Permanent)\nFrom: [Valyrian Order](<https://politicsandwar.com/alliance/id=13111>) - #58 (19 nations)\nTo: [Horizons Dawn](<https://politicsandwar.com/alliance/id=13382>) - #113 (5 nations)\n**Signed EXTENSION | rank #4**\nTime remaining: Permanent (Permanent)\nFrom: [The Enterprise](<https://politicsandwar.com/alliance/id=4829>) - #28 (61 nations)\nTo: [The Syndicate](<https://politicsandwar.com/alliance/id=831>) - #4 (99 nations)\n**Signed PROTECTORATE | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Royal Alba Charter Company](<https://politicsandwar.com/alliance/id=2510>) - #49 (10 nations)\n**Signed MDOAP | rank #9**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\n**Signed PROTECTORATE | rank #53**\nTime remaining: <t:1740564000:R> (675 turns)\nFrom: [-Yorkshire-](<https://politicsandwar.com/alliance/id=10377>) - #53 (18 nations)\nTo:",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T05:10:57.099000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed EXTENSION | rank #9\nTime remaining: <t:1745107200:R> (1306 turns)\nFrom: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\nTo: [Dark",
+    "source_message_json": {
+      "id": "1323881126582026343",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T05:10:57.099000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed MDP | rank #9**\nTime remaining: <t:1748116800:R> (1724 turns)\nFrom: [House Stark](<https://politicsandwar.com/alliance/id=3683>) - #22 (40 nations)\nTo: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\n**Signed PIAT | rank #120**\nTime remaining: <t:1745438400:R> (1352 turns)\nFrom: [North Atlantic Treaty Organization](<https://politicsandwar.com/alliance/id=13288>) - #120 (8 nations)\nTo: [European Broadcasting Union](<https://politicsandwar.com/alliance/id=13170>) - #298 (1 nations)\n**Signed MDOAP | rank #2**\nTime remaining: <t:1746151200:R> (1451 turns)\nFrom: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\nTo: [Event Horizon](<https://politicsandwar.com/alliance/id=12480>) - #2 (168 nations)\n**Signed EXTENSION | rank #22**\nTime remaining: <t:1748059200:R> (1716 turns)\nFrom: [The Wall](<https://politicsandwar.com/alliance/id=13221>) - #156 (1 nations)\nTo: [House Stark](<https://politicsandwar.com/alliance/id=3683>) - #22 (40 nations)\n**Signed MDOAP | rank #95**\nTime remaining: <t:1737943200:R> (311 turns)\nFrom: [Black Panther](<https://politicsandwar.com/alliance/id=13434>) - #95 (15 nations)\nTo: [The Franatic Kingdom](<https://politicsandwar.com/alliance/id=13326>) - #115 (7 nations)\n**Signed MDOAP | rank #2**\nTime remaining: Permanent (Permanent)\nFrom: [Man I Love Frogs](<https://politicsandwar.com/alliance/id=10177>) - #42 (18 nations)\nTo: [Event Horizon](<https://politicsandwar.com/alliance/id=12480>) - #2 (168 nations)\n**Signed PROTECTORATE | rank #40**\nTime remaining: Permanent (Permanent)\nFrom: [Vault-Tec](<https://politicsandwar.com/alliance/id=10075>) - #40 (31 nations)\nTo: [Union of Soviet Socialist Republics](<https://politicsandwar.com/alliance/id=12611>) - #90 (17 nations)\n**Signed EXTENSION | rank #9**\nTime remaining: <t:1745107200:R> (1306 turns)\nFrom: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\nTo: [Dark",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T05:08:57.167000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed ODOAP | rank #152\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+    "source_message_json": {
+      "id": "1323880623550632051",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T05:08:57.167000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed PROTECTORATE | rank\n#43**\nTime remaining: <t:1741190400:R> (762 turns)\nFrom: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\nTo: [Anti-Horridism Obocchama Kun](<https://politicsandwar.com/alliance/id=10455>) - #163 (1 nations)\n**Signed ODOAP | rank #152**\nTime remaining: Permanent (Permanent)\nFrom: [European Coal And Steel Coalition](<https://politicsandwar.com/alliance/id=13486>) - #220 (2 nations)\nTo: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\n**Signed ODP | rank #29**\nTime remaining: <t:1736301600:R> (83 turns)\nFrom: [The Republic of Libertas](<https://politicsandwar.com/alliance/id=11009>) - #29 (44 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed EXTENSION | rank #38**\nTime remaining: <t:1740182400:R> (622 turns)\nFrom: [Darkstar](<https://politicsandwar.com/alliance/id=10259>) - #38 (43 nations)\nTo: [The house](<https://politicsandwar.com/alliance/id=12985>) - #79 (10 nations)\n**Signed PROTECTORATE | rank #11**\nTime remaining: Permanent (Permanent)\nFrom: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #11 (71 nations)\nTo: [The Aegis Order](<https://politicsandwar.com/alliance/id=9445>) - #47 (28 nations)\n**Signed EXTENSION | rank #14**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [General Area of Three Ostritches](<https://politicsandwar.com/alliance/id=13311>) - #141 (1 nations)\n**Signed EXTENSION | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Banana Stand](<https://politicsandwar.com/alliance/id=7000>) - #88 (2 nations)\n**Signed ODOAP | rank #152**\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T05:03:43.783000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed ODOAP | rank #152\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+    "source_message_json": {
+      "id": "1323879309122998343",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T05:03:43.783000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed PROTECTORATE | rank\n#43**\nTime remaining: <t:1741190400:R> (762 turns)\nFrom: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\nTo: [Anti-Horridism Obocchama Kun](<https://politicsandwar.com/alliance/id=10455>) - #163 (1 nations)\n**Signed ODOAP | rank #152**\nTime remaining: Permanent (Permanent)\nFrom: [European Coal And Steel Coalition](<https://politicsandwar.com/alliance/id=13486>) - #220 (2 nations)\nTo: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\n**Signed ODP | rank #29**\nTime remaining: <t:1736301600:R> (83 turns)\nFrom: [The Republic of Libertas](<https://politicsandwar.com/alliance/id=11009>) - #29 (44 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed EXTENSION | rank #38**\nTime remaining: <t:1740182400:R> (622 turns)\nFrom: [Darkstar](<https://politicsandwar.com/alliance/id=10259>) - #38 (43 nations)\nTo: [The house](<https://politicsandwar.com/alliance/id=12985>) - #79 (10 nations)\n**Signed PROTECTORATE | rank #11**\nTime remaining: Permanent (Permanent)\nFrom: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #11 (71 nations)\nTo: [The Aegis Order](<https://politicsandwar.com/alliance/id=9445>) - #47 (28 nations)\n**Signed EXTENSION | rank #14**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [General Area of Three Ostritches](<https://politicsandwar.com/alliance/id=13311>) - #141 (1 nations)\n**Signed EXTENSION | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Banana Stand](<https://politicsandwar.com/alliance/id=7000>) - #88 (2 nations)\n**Signed ODOAP | rank #152**\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T05:00:46.958000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed EXTENSION | rank #143\nTime remaining: <t:1746136800:R> (1449 turns)\nFrom: [The Empire of the Moonlit Sakura](<https://politicsandwar.com/alliance/id=4623>) - #143 (6 nations)\nTo:",
+    "source_message_json": {
+      "id": "1323878567465058445",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T05:00:46.958000+00:00",
+      "edited_timestamp": null,
+      "content": "nations)\n**Signed EXTENSION | rank #10**\nTime remaining: <t:1742054400:R> (882 turns)\nFrom: [Hangover](<https://politicsandwar.com/alliance/id=13447>) - #78 (2 nations)\nTo: [Grumpy Old Bastards](<https://politicsandwar.com/alliance/id=3339>) - #10 (36 nations)\n**Signed NAP | rank #54**\nTime remaining: <t:1740088800:R> (609 turns)\nFrom: [The Republic of free nations](<https://politicsandwar.com/alliance/id=13404>) - #54 (40 nations)\nTo: [Pravida](<https://politicsandwar.com/alliance/id=13014>) - #77 (13 nations)\n**Signed MDOAP | rank #15**\nTime remaining: <t:1738101600:R> (333 turns)\nFrom: [Name Withheld](<https://politicsandwar.com/alliance/id=8236>) - #15 (57 nations)\nTo: [Mayhem](<https://politicsandwar.com/alliance/id=10269>) - #45 (13 nations)\n**Signed PROTECTORATE | rank #41**\nTime remaining: <t:1750291200:R> (2026 turns)\nFrom: [United Socialist Nations](<https://politicsandwar.com/alliance/id=2594>) - #41 (31 nations)\nTo: [Petrograd Soviet](<https://politicsandwar.com/alliance/id=11609>) - #157 (1 nations)\n**Signed EXTENSION | rank #9**\nTime remaining: <t:1746273600:R> (1468 turns)\nFrom: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\nTo: [Farkistan](<https://politicsandwar.com/alliance/id=1246>) - #89 (2 nations)\n**Signed MDOAP | rank #26**\nTime remaining: <t:1745992800:R> (1429 turns)\nFrom: [World Task Force](<https://politicsandwar.com/alliance/id=1210>) - #26 (37 nations)\nTo: [The Republic of Libertas](<https://politicsandwar.com/alliance/id=11009>) - #29 (44 nations)\n**Signed ODOAP | rank #79**\nTime remaining: <t:1741327200:R> (781 turns)\nFrom: [The Empire of the Moonlit Sakura](<https://politicsandwar.com/alliance/id=4623>) - #143 (6 nations)\nTo: [The house](<https://politicsandwar.com/alliance/id=12985>) - #79 (10 nations)\n**Signed EXTENSION | rank #143**\nTime remaining: <t:1746136800:R> (1449 turns)\nFrom: [The Empire of the Moonlit Sakura](<https://politicsandwar.com/alliance/id=4623>) - #143 (6 nations)\nTo:",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:55:18.093000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed PROTECTORATE | rank #53\nTime remaining: <t:1740564000:R> (675 turns)\nFrom: [-Yorkshire-](<https://politicsandwar.com/alliance/id=10377>) - #53 (18 nations)\nTo:",
+    "source_message_json": {
+      "id": "1323877188105408543",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:55:18.093000+00:00",
+      "edited_timestamp": null,
+      "content": "Brotherhood](<https://politicsandwar.com/alliance/id=12097>) - #131 (1 nations)\n**Signed MDOAP | rank #22**\nTime remaining: <t:1739404800:R> (514 turns)\nFrom: [House Stark](<https://politicsandwar.com/alliance/id=3683>) - #22 (40 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed ODOAP | rank #98**\nTime remaining: <t:1743444000:R> (1075 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Agora](<https://politicsandwar.com/alliance/id=12705>) - #98 (6 nations)\n**Signed PIAT | rank #166**\nTime remaining: Permanent (Permanent)\nFrom: [The United Nations](<https://politicsandwar.com/alliance/id=13485>) - #166 (5 nations)\nTo: [The Freedom Arc](<https://politicsandwar.com/alliance/id=13427>) - #207 (3 nations)\n**Signed EXTENSION | rank #58**\nTime remaining: Permanent (Permanent)\nFrom: [Valyrian Order](<https://politicsandwar.com/alliance/id=13111>) - #58 (19 nations)\nTo: [Horizons Dawn](<https://politicsandwar.com/alliance/id=13382>) - #113 (5 nations)\n**Signed EXTENSION | rank #4**\nTime remaining: Permanent (Permanent)\nFrom: [The Enterprise](<https://politicsandwar.com/alliance/id=4829>) - #28 (61 nations)\nTo: [The Syndicate](<https://politicsandwar.com/alliance/id=831>) - #4 (99 nations)\n**Signed PROTECTORATE | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Royal Alba Charter Company](<https://politicsandwar.com/alliance/id=2510>) - #49 (10 nations)\n**Signed MDOAP | rank #9**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\n**Signed PROTECTORATE | rank #53**\nTime remaining: <t:1740564000:R> (675 turns)\nFrom: [-Yorkshire-](<https://politicsandwar.com/alliance/id=10377>) - #53 (18 nations)\nTo:",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:55:16.460000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed EXTENSION | rank #9\nTime remaining: <t:1745107200:R> (1306 turns)\nFrom: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\nTo: [Dark",
+    "source_message_json": {
+      "id": "1323877181255847946",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:55:16.460000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed MDP | rank #9**\nTime remaining: <t:1748116800:R> (1724 turns)\nFrom: [House Stark](<https://politicsandwar.com/alliance/id=3683>) - #22 (40 nations)\nTo: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\n**Signed PIAT | rank #120**\nTime remaining: <t:1745438400:R> (1352 turns)\nFrom: [North Atlantic Treaty Organization](<https://politicsandwar.com/alliance/id=13288>) - #120 (8 nations)\nTo: [European Broadcasting Union](<https://politicsandwar.com/alliance/id=13170>) - #298 (1 nations)\n**Signed MDOAP | rank #2**\nTime remaining: <t:1746151200:R> (1451 turns)\nFrom: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\nTo: [Event Horizon](<https://politicsandwar.com/alliance/id=12480>) - #2 (169 nations)\n**Signed EXTENSION | rank #22**\nTime remaining: <t:1748059200:R> (1716 turns)\nFrom: [The Wall](<https://politicsandwar.com/alliance/id=13221>) - #156 (1 nations)\nTo: [House Stark](<https://politicsandwar.com/alliance/id=3683>) - #22 (40 nations)\n**Signed MDOAP | rank #95**\nTime remaining: <t:1737943200:R> (311 turns)\nFrom: [Black Panther](<https://politicsandwar.com/alliance/id=13434>) - #95 (15 nations)\nTo: [The Franatic Kingdom](<https://politicsandwar.com/alliance/id=13326>) - #115 (7 nations)\n**Signed MDOAP | rank #2**\nTime remaining: Permanent (Permanent)\nFrom: [Man I Love Frogs](<https://politicsandwar.com/alliance/id=10177>) - #42 (18 nations)\nTo: [Event Horizon](<https://politicsandwar.com/alliance/id=12480>) - #2 (169 nations)\n**Signed PROTECTORATE | rank #40**\nTime remaining: Permanent (Permanent)\nFrom: [Vault-Tec](<https://politicsandwar.com/alliance/id=10075>) - #40 (31 nations)\nTo: [Union of Soviet Socialist Republics](<https://politicsandwar.com/alliance/id=12611>) - #90 (17 nations)\n**Signed EXTENSION | rank #9**\nTime remaining: <t:1745107200:R> (1306 turns)\nFrom: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\nTo: [Dark",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:53:15.753000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed ODOAP | rank #152\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+    "source_message_json": {
+      "id": "1323876674974257255",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:53:15.753000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed PROTECTORATE | rank\n#43**\nTime remaining: <t:1741190400:R> (762 turns)\nFrom: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\nTo: [Anti-Horridism Obocchama Kun](<https://politicsandwar.com/alliance/id=10455>) - #163 (1 nations)\n**Signed ODOAP | rank #152**\nTime remaining: Permanent (Permanent)\nFrom: [European Coal And Steel Coalition](<https://politicsandwar.com/alliance/id=13486>) - #220 (2 nations)\nTo: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\n**Signed ODP | rank #29**\nTime remaining: <t:1736301600:R> (83 turns)\nFrom: [The Republic of Libertas](<https://politicsandwar.com/alliance/id=11009>) - #29 (44 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed EXTENSION | rank #38**\nTime remaining: <t:1740182400:R> (622 turns)\nFrom: [Darkstar](<https://politicsandwar.com/alliance/id=10259>) - #38 (43 nations)\nTo: [The house](<https://politicsandwar.com/alliance/id=12985>) - #79 (10 nations)\n**Signed PROTECTORATE | rank #11**\nTime remaining: Permanent (Permanent)\nFrom: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #11 (71 nations)\nTo: [The Aegis Order](<https://politicsandwar.com/alliance/id=9445>) - #47 (28 nations)\n**Signed EXTENSION | rank #14**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [General Area of Three Ostritches](<https://politicsandwar.com/alliance/id=13311>) - #141 (1 nations)\n**Signed EXTENSION | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Banana Stand](<https://politicsandwar.com/alliance/id=7000>) - #88 (2 nations)\n**Signed ODOAP | rank #152**\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:48:02.447000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed ODOAP | rank #152\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+    "source_message_json": {
+      "id": "1323875360873513032",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:48:02.447000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed PROTECTORATE | rank\n#43**\nTime remaining: <t:1741190400:R> (762 turns)\nFrom: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\nTo: [Anti-Horridism Obocchama Kun](<https://politicsandwar.com/alliance/id=10455>) - #163 (1 nations)\n**Signed ODOAP | rank #152**\nTime remaining: Permanent (Permanent)\nFrom: [European Coal And Steel Coalition](<https://politicsandwar.com/alliance/id=13486>) - #220 (2 nations)\nTo: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\n**Signed ODP | rank #29**\nTime remaining: <t:1736301600:R> (83 turns)\nFrom: [The Republic of Libertas](<https://politicsandwar.com/alliance/id=11009>) - #29 (44 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed EXTENSION | rank #38**\nTime remaining: <t:1740182400:R> (622 turns)\nFrom: [Darkstar](<https://politicsandwar.com/alliance/id=10259>) - #38 (43 nations)\nTo: [The house](<https://politicsandwar.com/alliance/id=12985>) - #79 (10 nations)\n**Signed PROTECTORATE | rank #11**\nTime remaining: Permanent (Permanent)\nFrom: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #11 (71 nations)\nTo: [The Aegis Order](<https://politicsandwar.com/alliance/id=9445>) - #47 (28 nations)\n**Signed EXTENSION | rank #14**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [General Area of Three Ostritches](<https://politicsandwar.com/alliance/id=13311>) - #141 (1 nations)\n**Signed EXTENSION | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Banana Stand](<https://politicsandwar.com/alliance/id=7000>) - #88 (2 nations)\n**Signed ODOAP | rank #152**\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:44:50.782000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed PROTECTORATE | rank #41\nTime remaining: <t:1742032800:R> (879 turns)\nFrom: [United Socialist Nations](<https://politicsandwar.com/alliance/id=2594>) - #41 (31 nations)\nTo:",
+    "source_message_json": {
+      "id": "1323874556972105740",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:44:50.782000+00:00",
+      "edited_timestamp": null,
+      "content": "Immortals](<https://politicsandwar.com/alliance/id=5875>) - #8 (115 nations)\n**Signed PROTECTORATE | rank #19**\nTime remaining: <t:1741996800:R> (874 turns)\nFrom: [The Sword Coast](<https://politicsandwar.com/alliance/id=12281>) - #19 (55 nations)\nTo: [The Inazuma Shogunate](<https://politicsandwar.com/alliance/id=13033>) - #66 (7 nations)\n**Signed ODOAP | rank #22**\nTime remaining: <t:1742760000:R> (980 turns)\nFrom: [House Stark](<https://politicsandwar.com/alliance/id=3683>) - #22 (40 nations)\nTo: [Federated States of Orbis](<https://politicsandwar.com/alliance/id=8899>) - #35 (40 nations)\n**Signed MDP | rank #5**\nTime remaining: <t:1743926400:R> (1142 turns)\nFrom: [Black Knights](<https://politicsandwar.com/alliance/id=877>) - #23 (44 nations)\nTo: [Rose](<https://politicsandwar.com/alliance/id=790>) - #5 (208 nations)\n**Signed PIAT | rank #207**\nTime remaining: Permanent (Permanent)\nFrom: [The Freedom Arc](<https://politicsandwar.com/alliance/id=13427>) - #207 (3 nations)\nTo: [European Coal And Steel Coalition](<https://politicsandwar.com/alliance/id=13486>) - #220 (2 nations)\n**Signed MDOAP | rank #9**\nTime remaining: <t:1743782400:R> (1122 turns)\nFrom: [World Task Force](<https://politicsandwar.com/alliance/id=1210>) - #26 (37 nations)\nTo: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\n**Signed MDP | rank #27**\nTime remaining: Permanent (Permanent)\nFrom: [Chocolate Castle](<https://politicsandwar.com/alliance/id=7346>) - #2147483647 (0 nations)\nTo: [Guardian](<https://politicsandwar.com/alliance/id=619>) - #27 (35 nations)\n**Signed MDOAP | rank #5**\nTime remaining: <t:1735754400:R> (7 turns)\nFrom: [Rose](<https://politicsandwar.com/alliance/id=790>) - #5 (208 nations)\nTo: [Guardian](<https://politicsandwar.com/alliance/id=619>) - #27 (35 nations)\n**Signed PROTECTORATE | rank #41**\nTime remaining: <t:1742032800:R> (879 turns)\nFrom: [United Socialist Nations](<https://politicsandwar.com/alliance/id=2594>) - #41 (31 nations)\nTo:",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:44:49.070000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed MDOAP | rank #1\nTime remaining: <t:1744228800:R> (1184 turns)\nFrom: [Eclipse](<https://politicsandwar.com/alliance/id=7450>) - #1 (212 nations)\nTo: [The",
+    "source_message_json": {
+      "id": "1323874549791719496",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:44:49.070000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed\nPROTECTORATE | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Royal Alba Charter Company](<https://politicsandwar.com/alliance/id=2510>) - #49 (10 nations)\n**Signed MDOAP | rank #9**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\n**Signed PROTECTORATE | rank #53**\nTime remaining: <t:1740564000:R> (675 turns)\nFrom: [-Yorkshire-](<https://politicsandwar.com/alliance/id=10377>) - #53 (18 nations)\nTo: [Sail Loves Singularity](<https://politicsandwar.com/alliance/id=12461>) - #153 (1 nations)\n**Signed PROTECTORATE | rank #42**\nTime remaining: <t:1745121600:R> (1308 turns)\nFrom: [Man I Love Frogs](<https://politicsandwar.com/alliance/id=10177>) - #42 (18 nations)\nTo: [Pika Party](<https://politicsandwar.com/alliance/id=9661>) - #149 (1 nations)\n**Signed PROTECTORATE | rank #19**\nTime remaining: <t:1740564000:R> (675 turns)\nFrom: [The Sword Coast](<https://politicsandwar.com/alliance/id=12281>) - #19 (55 nations)\nTo: [Sail Loves Singularity](<https://politicsandwar.com/alliance/id=12461>) - #153 (1 nations)\n**Signed EXTENSION | rank #89**\nTime remaining: <t:1742752800:R> (979 turns)\nFrom: [Farkistan](<https://politicsandwar.com/alliance/id=1246>) - #89 (2 nations)\nTo: [Legion Of Dawn](<https://politicsandwar.com/alliance/id=3427>) - #129 (1 nations)\n**Signed EXTENSION | rank #18**\nTime remaining: <t:1743480000:R> (1080 turns)\nFrom: [City Skylines 2](<https://politicsandwar.com/alliance/id=13245>) - #99 (2 nations)\nTo: [The Legion](<https://politicsandwar.com/alliance/id=7580>) - #18 (43 nations)\n**Signed MDOAP | rank #1**\nTime remaining: <t:1744228800:R> (1184 turns)\nFrom: [Eclipse](<https://politicsandwar.com/alliance/id=7450>) - #1 (212 nations)\nTo: [The",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:42:48.430000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed ODOAP | rank #152\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+    "source_message_json": {
+      "id": "1323874043790753805",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:42:48.430000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed PROTECTORATE | rank\n#43**\nTime remaining: <t:1741190400:R> (762 turns)\nFrom: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\nTo: [Anti-Horridism Obocchama Kun](<https://politicsandwar.com/alliance/id=10455>) - #163 (1 nations)\n**Signed ODOAP | rank #152**\nTime remaining: Permanent (Permanent)\nFrom: [European Coal And Steel Coalition](<https://politicsandwar.com/alliance/id=13486>) - #220 (2 nations)\nTo: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\n**Signed ODP | rank #29**\nTime remaining: <t:1736301600:R> (83 turns)\nFrom: [The Republic of Libertas](<https://politicsandwar.com/alliance/id=11009>) - #29 (44 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed EXTENSION | rank #38**\nTime remaining: <t:1740182400:R> (622 turns)\nFrom: [Darkstar](<https://politicsandwar.com/alliance/id=10259>) - #38 (43 nations)\nTo: [The house](<https://politicsandwar.com/alliance/id=12985>) - #79 (10 nations)\n**Signed PROTECTORATE | rank #11**\nTime remaining: Permanent (Permanent)\nFrom: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #11 (71 nations)\nTo: [The Aegis Order](<https://politicsandwar.com/alliance/id=9445>) - #47 (28 nations)\n**Signed EXTENSION | rank #14**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [General Area of Three Ostritches](<https://politicsandwar.com/alliance/id=13311>) - #141 (1 nations)\n**Signed EXTENSION | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Banana Stand](<https://politicsandwar.com/alliance/id=7000>) - #88 (2 nations)\n**Signed ODOAP | rank #152**\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:39:38.282000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed MDOAP | rank #14\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo:",
+    "source_message_json": {
+      "id": "1323873246252105752",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:39:38.282000+00:00",
+      "edited_timestamp": null,
+      "content": "Empire of the Moonlit Sakura](<https://politicsandwar.com/alliance/id=4623>) - #143 (6 nations)\n**Signed EXTENSION**\nTime remaining: <t:1746136800:R> (1449 turns)\nFrom: [NukaWorld](<https://politicsandwar.com/alliance/id=7698>) - #2147483647 (0 nations)\nTo: [Nuka-Town](<https://politicsandwar.com/alliance/id=11610>) - #2147483647 (0 nations)\n**Signed PROTECTORATE | rank #33**\nTime remaining: <t:1748239200:R> (1741 turns)\nFrom: [The Golden Horde](<https://politicsandwar.com/alliance/id=4567>) - #33 (37 nations)\nTo: [Crimson Corp](<https://politicsandwar.com/alliance/id=12234>) - #164 (1 nations)\n**Signed MDOAP | rank #31**\nTime remaining: <t:1748239200:R> (1741 turns)\nFrom: [The Golden Horde](<https://politicsandwar.com/alliance/id=4567>) - #33 (37 nations)\nTo: [The High Table](<https://politicsandwar.com/alliance/id=11339>) - #31 (50 nations)\n**Signed EXTENSION | rank #33**\nTime remaining: Permanent (Permanent)\nFrom: [The Golden Horde](<https://politicsandwar.com/alliance/id=4567>) - #33 (37 nations)\nTo: [The Golden Shower](<https://politicsandwar.com/alliance/id=13268>) - #184 (1 nations)\n**Signed EXTENSION | rank #60**\nTime remaining: Permanent (Permanent)\nFrom: [Boomer](<https://politicsandwar.com/alliance/id=12478>) - #135 (1 nations)\nTo: [Akatsuki](<https://politicsandwar.com/alliance/id=10555>) - #60 (7 nations)\n**Signed MDOAP | rank #104**\nTime remaining: <t:1736755200:R> (146 turns)\nFrom: [Valinor](<https://politicsandwar.com/alliance/id=10523>) - #104 (2 nations)\nTo: [Nibelheim](<https://politicsandwar.com/alliance/id=13058>) - #138 (1 nations)\n**Signed MDOAP | rank #9**\nTime remaining: <t:1739980800:R> (594 turns)\nFrom: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #11 (71 nations)\nTo: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\n**Signed MDOAP | rank #14**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo:",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:39:37.001000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed EXTENSION | rank #143\nTime remaining: <t:1746136800:R> (1449 turns)\nFrom: [NukaWorld](<https://politicsandwar.com/alliance/id=7698>) - #2147483647 (0 nations)\nTo: [The",
+    "source_message_json": {
+      "id": "1323873240879337472",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:39:37.001000+00:00",
+      "edited_timestamp": null,
+      "content": "To: [Sail Loves Singularity](<https://politicsandwar.com/alliance/id=12461>) - #153 (1 nations)\n**Signed ODOAP | rank #152**\nTime remaining: <t:1742968800:R> (1009 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Crimson Vanguard](<https://politicsandwar.com/alliance/id=13400>) - #340 (1 nations)\n**Signed ODOAP | rank #7**\nTime remaining: <t:1741838400:R> (852 turns)\nFrom: [The Fighting Pacifists](<https://politicsandwar.com/alliance/id=1023>) - #7 (124 nations)\nTo: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\n**Signed MDOAP | rank #13**\nTime remaining: <t:1744012800:R> (1154 turns)\nFrom: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\nTo: [Weaponized Assault Penguins](<https://politicsandwar.com/alliance/id=11189>) - #13 (57 nations)\n**Signed PIAT | rank #76**\nTime remaining: <t:1749758400:R> (1952 turns)\nFrom: [The Hand of Fate](<https://politicsandwar.com/alliance/id=9000>) - #76 (3 nations)\nTo: [Nemesys](<https://politicsandwar.com/alliance/id=11965>) - #82 (6 nations)\n**Signed MDOAP | rank #1**\nTime remaining: <t:1740268800:R> (634 turns)\nFrom: [Knights Templar](<https://politicsandwar.com/alliance/id=4124>) - #17 (45 nations)\nTo: [Eclipse](<https://politicsandwar.com/alliance/id=7450>) - #1 (212 nations)\n**Signed MDOAP | rank #5**\nTime remaining: <t:1735754400:R> (7 turns)\nFrom: [Rose](<https://politicsandwar.com/alliance/id=790>) - #5 (208 nations)\nTo: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\n**Signed MDP | rank #47**\nTime remaining: Permanent (Permanent)\nFrom: [The Aegis Order](<https://politicsandwar.com/alliance/id=9445>) - #47 (28 nations)\nTo: [Liberty Coalition](<https://politicsandwar.com/alliance/id=12919>) - #62 (21 nations)\n**Signed EXTENSION | rank #143**\nTime remaining: <t:1746136800:R> (1449 turns)\nFrom: [NukaWorld](<https://politicsandwar.com/alliance/id=7698>) - #2147483647 (0 nations)\nTo: [The",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:39:35.291000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed PROTECTORATE | rank #19\nTime remaining: <t:1741996800:R> (874 turns)\nFrom: [The Sword Coast](<https://politicsandwar.com/alliance/id=12281>) - #19 (55 nations)\nTo: [The Inazuma",
+    "source_message_json": {
+      "id": "1323873233707208775",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:39:35.291000+00:00",
+      "edited_timestamp": null,
+      "content": "nations)\n**Signed MDOAP | rank #9**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [Spectre](<https://politicsandwar.com/alliance/id=4221>) - #9 (88 nations)\n**Signed PROTECTORATE | rank #53**\nTime remaining: <t:1740564000:R> (675 turns)\nFrom: [-Yorkshire-](<https://politicsandwar.com/alliance/id=10377>) - #53 (18 nations)\nTo: [Sail Loves Singularity](<https://politicsandwar.com/alliance/id=12461>) - #153 (1 nations)\n**Signed PROTECTORATE | rank #42**\nTime remaining: <t:1745121600:R> (1308 turns)\nFrom: [Man I Love Frogs](<https://politicsandwar.com/alliance/id=10177>) - #42 (18 nations)\nTo: [Pika Party](<https://politicsandwar.com/alliance/id=9661>) - #149 (1 nations)\n**Signed PROTECTORATE | rank #19**\nTime remaining: <t:1740564000:R> (675 turns)\nFrom: [The Sword Coast](<https://politicsandwar.com/alliance/id=12281>) - #19 (55 nations)\nTo: [Sail Loves Singularity](<https://politicsandwar.com/alliance/id=12461>) - #153 (1 nations)\n**Signed EXTENSION | rank #89**\nTime remaining: <t:1742752800:R> (979 turns)\nFrom: [Farkistan](<https://politicsandwar.com/alliance/id=1246>) - #89 (2 nations)\nTo: [Legion Of Dawn](<https://politicsandwar.com/alliance/id=3427>) - #129 (1 nations)\n**Signed EXTENSION | rank #18**\nTime remaining: <t:1743480000:R> (1080 turns)\nFrom: [City Skylines 2](<https://politicsandwar.com/alliance/id=13245>) - #99 (2 nations)\nTo: [The Legion](<https://politicsandwar.com/alliance/id=7580>) - #18 (43 nations)\n**Signed MDOAP | rank #1**\nTime remaining: <t:1744228800:R> (1184 turns)\nFrom: [Eclipse](<https://politicsandwar.com/alliance/id=7450>) - #1 (212 nations)\nTo: [The Immortals](<https://politicsandwar.com/alliance/id=5875>) - #8 (115 nations)\n**Signed PROTECTORATE | rank #19**\nTime remaining: <t:1741996800:R> (874 turns)\nFrom: [The Sword Coast](<https://politicsandwar.com/alliance/id=12281>) - #19 (55 nations)\nTo: [The Inazuma",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:37:34.428000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed ODOAP | rank #152\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+    "source_message_json": {
+      "id": "1323872726771040276",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:37:34.428000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed PROTECTORATE | rank\n#43**\nTime remaining: <t:1741190400:R> (762 turns)\nFrom: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\nTo: [Anti-Horridism Obocchama Kun](<https://politicsandwar.com/alliance/id=10455>) - #163 (1 nations)\n**Signed ODOAP | rank #152**\nTime remaining: Permanent (Permanent)\nFrom: [European Coal And Steel Coalition](<https://politicsandwar.com/alliance/id=13486>) - #220 (2 nations)\nTo: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\n**Signed ODP | rank #29**\nTime remaining: <t:1736301600:R> (83 turns)\nFrom: [The Republic of Libertas](<https://politicsandwar.com/alliance/id=11009>) - #29 (44 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed EXTENSION | rank #38**\nTime remaining: <t:1740182400:R> (622 turns)\nFrom: [Darkstar](<https://politicsandwar.com/alliance/id=10259>) - #38 (43 nations)\nTo: [The house](<https://politicsandwar.com/alliance/id=12985>) - #79 (10 nations)\n**Signed PROTECTORATE | rank #11**\nTime remaining: Permanent (Permanent)\nFrom: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #11 (71 nations)\nTo: [The Aegis Order](<https://politicsandwar.com/alliance/id=9445>) - #47 (28 nations)\n**Signed EXTENSION | rank #14**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [General Area of Three Ostritches](<https://politicsandwar.com/alliance/id=13311>) - #141 (1 nations)\n**Signed EXTENSION | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Banana Stand](<https://politicsandwar.com/alliance/id=7000>) - #88 (2 nations)\n**Signed ODOAP | rank #152**\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2025-01-01T04:32:21.408000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed ODOAP | rank #152\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+    "source_message_json": {
+      "id": "1323871413869740032",
+      "channel_id": "880473974436401182",
+      "timestamp": "2025-01-01T04:32:21.408000+00:00",
+      "edited_timestamp": null,
+      "content": "**Signed PROTECTORATE | rank\n#43**\nTime remaining: <t:1741190400:R> (762 turns)\nFrom: [Oblivion](<https://politicsandwar.com/alliance/id=4271>) - #43 (13 nations)\nTo: [Anti-Horridism Obocchama Kun](<https://politicsandwar.com/alliance/id=10455>) - #163 (1 nations)\n**Signed ODOAP | rank #152**\nTime remaining: Permanent (Permanent)\nFrom: [European Coal And Steel Coalition](<https://politicsandwar.com/alliance/id=13486>) - #220 (2 nations)\nTo: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\n**Signed ODP | rank #29**\nTime remaining: <t:1736301600:R> (83 turns)\nFrom: [The Republic of Libertas](<https://politicsandwar.com/alliance/id=11009>) - #29 (44 nations)\nTo: [The Fremen](<https://politicsandwar.com/alliance/id=12545>) - #55 (29 nations)\n**Signed EXTENSION | rank #38**\nTime remaining: <t:1740182400:R> (622 turns)\nFrom: [Darkstar](<https://politicsandwar.com/alliance/id=10259>) - #38 (43 nations)\nTo: [The house](<https://politicsandwar.com/alliance/id=12985>) - #79 (10 nations)\n**Signed PROTECTORATE | rank #11**\nTime remaining: Permanent (Permanent)\nFrom: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #11 (71 nations)\nTo: [The Aegis Order](<https://politicsandwar.com/alliance/id=9445>) - #47 (28 nations)\n**Signed EXTENSION | rank #14**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #14 (67 nations)\nTo: [General Area of Three Ostritches](<https://politicsandwar.com/alliance/id=13311>) - #141 (1 nations)\n**Signed EXTENSION | rank #3**\nTime remaining: Permanent (Permanent)\nFrom: [The Knights Radiant](<https://politicsandwar.com/alliance/id=1584>) - #3 (169 nations)\nTo: [Banana Stand](<https://politicsandwar.com/alliance/id=7000>) - #88 (2 nations)\n**Signed ODOAP | rank #152**\nTime remaining: <t:1742940000:R> (1005 turns)\nFrom: [Galactic Empire](<https://politicsandwar.com/alliance/id=13360>) - #152 (4 nations)\nTo: [Pines",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2024-12-10T10:25:25.613000+00:00",
+    "severity": "info",
+    "flag_type": "truncated_treaty_fragment",
+    "details": "Treaty-like content segment appears truncated (content_truncated_to_line).",
+    "raw_excerpt": "Signed EXTENSION | rank #16\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #16 (66 nations)\nTo: [The",
+    "source_message_json": {
+      "id": "1315987733822308394",
+      "channel_id": "880473974436401182",
+      "timestamp": "2024-12-10T10:25:25.613000+00:00",
+      "edited_timestamp": null,
+      "content": "EXTENSION | rank #43**\nTime remaining: Permanent (Permanent)\nFrom: [Yarr](<https://politicsandwar.com/alliance/id=4150>) - #43 (11 nations)\nTo: [Arctic Ocean](<https://politicsandwar.com/alliance/id=10279>) - #97 (1 nations)\n**Signed EXTENSION | rank #57**\nTime remaining: Permanent (Permanent)\nFrom: [Valyrian Order](<https://politicsandwar.com/alliance/id=13111>) - #57 (24 nations)\nTo: [Vinland Colony](<https://politicsandwar.com/alliance/id=13399>) - #108 (9 nations)\n**Signed MDOAP | rank #12**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #16 (66 nations)\nTo: [Camelot](<https://politicsandwar.com/alliance/id=4937>) - #12 (78 nations)\n**Signed MDOAP | rank #16**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #16 (66 nations)\nTo: [United Ummah](<https://politicsandwar.com/alliance/id=7750>) - #36 (33 nations)\n**Signed MDOAP | rank #16**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #16 (66 nations)\nTo: [House Stark](<https://politicsandwar.com/alliance/id=3683>) - #26 (41 nations)\n**Signed PROTECTORATE | rank #16**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #16 (66 nations)\nTo: [-Yorkshire-](<https://politicsandwar.com/alliance/id=10377>) - #53 (19 nations)\n**Signed PROTECTORATE | rank #16**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #16 (66 nations)\nTo: [Uppsala](<https://politicsandwar.com/alliance/id=13356>) - #109 (6 nations)\n**Signed EXTENSION | rank #16**\nTime remaining: Permanent (Permanent)\nFrom: [Global Alliance & Treaty Organization](<https://politicsandwar.com/alliance/id=7484>) - #16 (66 nations)\nTo: [The",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": []
+    }
+  },
+  {
+    "timestamp": "2022-08-16T03:09:36.003000+00:00",
+    "severity": "warning",
+    "flag_type": "missing_treaty_type_defaulted",
+    "details": "Treaty parsed from action-only header; treaty type defaulted to UNKNOWN.",
+    "raw_excerpt": "Signed\nFrom: [New Federation of Sovereign Nations](https://politicsandwar.com/alliance/id=10063)\nTo: [OMAIN](https://politicsandwar.com/alliance/id=9882)",
+    "source_message_json": {
+      "id": "1008935532245565471",
+      "channel_id": "880473974436401182",
+      "timestamp": "2022-08-16T03:09:36.003000+00:00",
+      "edited_timestamp": null,
+      "content": "",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": [
+        {
+          "title": "Signed",
+          "description": "From: [New Federation of Sovereign Nations](https://politicsandwar.com/alliance/id=10063)\nTo: [OMAIN](https://politicsandwar.com/alliance/id=9882)",
+          "url": null,
+          "type": "rich"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2022-08-16T01:26:53.375000+00:00",
+    "severity": "warning",
+    "flag_type": "missing_treaty_type_defaulted",
+    "details": "Treaty parsed from action-only header; treaty type defaulted to UNKNOWN.",
+    "raw_excerpt": "Signed\nFrom: [Crusaders of the Holy Boogaloo](https://politicsandwar.com/alliance/id=10117)\nTo: [I got waided](https://politicsandwar.com/alliance/id=10367)",
+    "source_message_json": {
+      "id": "1008909684310290472",
+      "channel_id": "880473974436401182",
+      "timestamp": "2022-08-16T01:26:53.375000+00:00",
+      "edited_timestamp": null,
+      "content": "",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": [
+        {
+          "title": "Signed",
+          "description": "From: [Crusaders of the Holy Boogaloo](https://politicsandwar.com/alliance/id=10117)\nTo: [I got waided](https://politicsandwar.com/alliance/id=10367)",
+          "url": null,
+          "type": "rich"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2022-08-15T23:56:03.258000+00:00",
+    "severity": "warning",
+    "flag_type": "missing_treaty_type_defaulted",
+    "details": "Treaty parsed from action-only header; treaty type defaulted to UNKNOWN.",
+    "raw_excerpt": "Signed\nFrom: [The Fighting Pacifists](https://politicsandwar.com/alliance/id=1023)\nTo: [The Coven](https://politicsandwar.com/alliance/id=9573)",
+    "source_message_json": {
+      "id": "1008886824862761032",
+      "channel_id": "880473974436401182",
+      "timestamp": "2022-08-15T23:56:03.258000+00:00",
+      "edited_timestamp": null,
+      "content": "",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": [
+        {
+          "title": "Signed",
+          "description": "From: [The Fighting Pacifists](https://politicsandwar.com/alliance/id=1023)\nTo: [The Coven](https://politicsandwar.com/alliance/id=9573)",
+          "url": null,
+          "type": "rich"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2022-08-15T18:06:34.343000+00:00",
+    "severity": "warning",
+    "flag_type": "missing_treaty_type_defaulted",
+    "details": "Treaty parsed from action-only header; treaty type defaulted to UNKNOWN.",
+    "raw_excerpt": "Signed\nFrom: [The Orion Project](https://politicsandwar.com/alliance/id=10252)\nTo: [Nebula](https://politicsandwar.com/alliance/id=10364)",
+    "source_message_json": {
+      "id": "1008798874858692738",
+      "channel_id": "880473974436401182",
+      "timestamp": "2022-08-15T18:06:34.343000+00:00",
+      "edited_timestamp": null,
+      "content": "",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": [
+        {
+          "title": "Signed",
+          "description": "From: [The Orion Project](https://politicsandwar.com/alliance/id=10252)\nTo: [Nebula](https://politicsandwar.com/alliance/id=10364)",
+          "url": null,
+          "type": "rich"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2022-08-15T16:17:59.382000+00:00",
+    "severity": "warning",
+    "flag_type": "missing_treaty_type_defaulted",
+    "details": "Treaty parsed from action-only header; treaty type defaulted to UNKNOWN.",
+    "raw_excerpt": "Signed\nFrom: [New Federation of Sovereign Nations](https://politicsandwar.com/alliance/id=10063)\nTo: [Lyre](https://politicsandwar.com/alliance/id=9629)",
+    "source_message_json": {
+      "id": "1008771549131706388",
+      "channel_id": "880473974436401182",
+      "timestamp": "2022-08-15T16:17:59.382000+00:00",
+      "edited_timestamp": null,
+      "content": "",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": [
+        {
+          "title": "Signed",
+          "description": "From: [New Federation of Sovereign Nations](https://politicsandwar.com/alliance/id=10063)\nTo: [Lyre](https://politicsandwar.com/alliance/id=9629)",
+          "url": null,
+          "type": "rich"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2022-08-15T15:53:32.007000+00:00",
+    "severity": "warning",
+    "flag_type": "missing_treaty_type_defaulted",
+    "details": "Treaty parsed from action-only header; treaty type defaulted to UNKNOWN.",
+    "raw_excerpt": "Signed\nFrom: [Rose](https://politicsandwar.com/alliance/id=790)\nTo: [Pika Party](https://politicsandwar.com/alliance/id=9661)",
+    "source_message_json": {
+      "id": "1008765394514874378",
+      "channel_id": "880473974436401182",
+      "timestamp": "2022-08-15T15:53:32.007000+00:00",
+      "edited_timestamp": null,
+      "content": "",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": [
+        {
+          "title": "Signed",
+          "description": "From: [Rose](https://politicsandwar.com/alliance/id=790)\nTo: [Pika Party](https://politicsandwar.com/alliance/id=9661)",
+          "url": null,
+          "type": "rich"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2022-08-15T15:35:06.007000+00:00",
+    "severity": "warning",
+    "flag_type": "missing_treaty_type_defaulted",
+    "details": "Treaty parsed from action-only header; treaty type defaulted to UNKNOWN.",
+    "raw_excerpt": "Signed\nFrom: [New Federation of Sovereign Nations](https://politicsandwar.com/alliance/id=10063)\nTo: [The Entente of Global Prosperity](https://politicsandwar.com/alliance/id=9535)",
+    "source_message_json": {
+      "id": "1008760755614666882",
+      "channel_id": "880473974436401182",
+      "timestamp": "2022-08-15T15:35:06.007000+00:00",
+      "edited_timestamp": null,
+      "content": "",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": [
+        {
+          "title": "Signed",
+          "description": "From: [New Federation of Sovereign Nations](https://politicsandwar.com/alliance/id=10063)\nTo: [The Entente of Global Prosperity](https://politicsandwar.com/alliance/id=9535)",
+          "url": null,
+          "type": "rich"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2022-08-15T14:46:38.468000+00:00",
+    "severity": "warning",
+    "flag_type": "missing_treaty_type_defaulted",
+    "details": "Treaty parsed from action-only header; treaty type defaulted to UNKNOWN.",
+    "raw_excerpt": "Signed\nFrom: [Age of Darkness](https://politicsandwar.com/alliance/id=10100)\nTo: [Vikings](https://politicsandwar.com/alliance/id=9611)",
+    "source_message_json": {
+      "id": "1008748560512188436",
+      "channel_id": "880473974436401182",
+      "timestamp": "2022-08-15T14:46:38.468000+00:00",
+      "edited_timestamp": null,
+      "content": "",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": [
+        {
+          "title": "Signed",
+          "description": "From: [Age of Darkness](https://politicsandwar.com/alliance/id=10100)\nTo: [Vikings](https://politicsandwar.com/alliance/id=9611)",
+          "url": null,
+          "type": "rich"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2022-08-15T13:46:18.052000+00:00",
+    "severity": "warning",
+    "flag_type": "missing_treaty_type_defaulted",
+    "details": "Treaty parsed from action-only header; treaty type defaulted to UNKNOWN.",
+    "raw_excerpt": "Signed\nFrom: [Federated States of Orbis](https://politicsandwar.com/alliance/id=8899)\nTo: [Heung Shing Corporation](https://politicsandwar.com/alliance/id=8577)",
+    "source_message_json": {
+      "id": "1008733375386894346",
+      "channel_id": "880473974436401182",
+      "timestamp": "2022-08-15T13:46:18.052000+00:00",
+      "edited_timestamp": null,
+      "content": "",
+      "author": {
+        "id": "672237266940198960",
+        "username": "Locutus",
+        "discriminator": "7602",
+        "bot": true
+      },
+      "embeds": [
+        {
+          "title": "Signed",
+          "description": "From: [Federated States of Orbis](https://politicsandwar.com/alliance/id=8899)\nTo: [Heung Shing Corporation](https://politicsandwar.com/alliance/id=8577)",
+          "url": null,
+          "type": "rich"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2025-05-26T00:01:28.952000+00:00",
+    "severity": "warning",
+    "flag_type": "churn_upgrade_downgrade_suppressed",
+    "details": "Suppressed extreme upgrade/downgrade churn burst for pair 12994-13250 on 2025-05-26: records=6062, unique_minutes=208, max_per_minute=31, avg_per_minute=29.14, window=2025-05-26T00:01:28.952000+00:00..2025-05-26T17:40:42.646000+00:00.",
+    "raw_excerpt": "day=2025-05-26 pair=12994-13250 records=6062 unique_minutes=208 max_per_minute=31 avg_per_minute=29.14"
+  },
+  {
+    "timestamp": "2025-05-25T14:35:22.991000+00:00",
+    "severity": "warning",
+    "flag_type": "churn_upgrade_downgrade_suppressed",
+    "details": "Suppressed extreme upgrade/downgrade churn burst for pair 12994-13250 on 2025-05-25: records=2838, unique_minutes=111, max_per_minute=31, avg_per_minute=25.57, window=2025-05-25T14:35:22.991000+00:00..2025-05-25T23:55:26.109000+00:00.",
+    "raw_excerpt": "day=2025-05-25 pair=12994-13250 records=2838 unique_minutes=111 max_per_minute=31 avg_per_minute=25.57"
+  }
+]

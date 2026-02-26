@@ -91,8 +91,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-download-bytes",
         type=int,
-        default=5242880,
-        help="Maximum bytes allowed per image download (default: 5 MiB)",
+        default=52428800,
+        help="Maximum bytes allowed per image download (default: 50 MiB)",
     )
     parser.add_argument(
         "--max-flags",
@@ -694,7 +694,7 @@ def validate_runtime_args(args: argparse.Namespace) -> None:
     if args.download_timeout_seconds <= 0:
         raise RuntimeError("download timeout must be positive")
     if args.max_download_bytes <= 0:
-        raise RuntimeError("max download bytes must be positive (default: 5242880)")
+        raise RuntimeError("max download bytes must be positive (default: 52428800)")
     if args.max_flags <= 0:
         raise RuntimeError("max flags must be positive")
     if args.max_retries < 0:
@@ -1906,6 +1906,40 @@ def build_runtime_events(
                 out["previous_flag_key"] = prev_key
 
         runtime_events.append(out)
+
+    # Backfill missing current flag keys from neighboring events within the same alliance.
+    # Prefer the most recent known key; if none exists yet, use the next known key.
+    alliance_event_indexes: dict[int, list[int]] = {}
+    for index, event in enumerate(runtime_events):
+        alliance_id = int(event.get("alliance_id") or 0)
+        if alliance_id <= 0:
+            continue
+        alliance_event_indexes.setdefault(alliance_id, []).append(index)
+
+    for indexes in alliance_event_indexes.values():
+        previous_keys: list[str] = []
+        last_seen_key = ""
+        for index in indexes:
+            previous_keys.append(last_seen_key)
+            key = str(runtime_events[index].get("flag_key") or "")
+            if key:
+                last_seen_key = key
+
+        next_keys: list[str] = [""] * len(indexes)
+        next_seen_key = ""
+        for pos in range(len(indexes) - 1, -1, -1):
+            next_keys[pos] = next_seen_key
+            key = str(runtime_events[indexes[pos]].get("flag_key") or "")
+            if key:
+                next_seen_key = key
+
+        for pos, index in enumerate(indexes):
+            event = runtime_events[index]
+            if str(event.get("flag_key") or ""):
+                continue
+            fallback_key = previous_keys[pos] or next_keys[pos]
+            if fallback_key:
+                event["flag_key"] = fallback_key
 
     return runtime_events
 

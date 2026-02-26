@@ -14,3 +14,29 @@ export function withBasePath(relativePath: string): string {
 export function dataAssetPath(fileName: string): string {
   return withBasePath(`data/${fileName}`);
 }
+
+export function normalizeDataAssetUrl(rawUrl: string, fallbackFileName: string): string {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) {
+    return dataAssetPath(fallbackFileName);
+  }
+
+  const isAbsolute = /^(?:[a-z][a-z\d+.-]*:)?\/\//i.test(trimmed);
+  if (isAbsolute || trimmed.startsWith("data:") || trimmed.startsWith("blob:")) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith("/")) {
+    return withBasePath(trimmed);
+  }
+
+  if (trimmed.startsWith("data/")) {
+    return withBasePath(trimmed);
+  }
+
+  if (!trimmed.includes("/")) {
+    return dataAssetPath(trimmed);
+  }
+
+  return withBasePath(trimmed);
+}

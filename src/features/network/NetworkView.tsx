@@ -16,6 +16,7 @@ import { resolveScoreRowForPlayhead } from "@/domain/timelapse/scoreDay";
 import { type QueryState, useFilterStore } from "@/features/filters/filterStore";
 import { clampDisplacement, dampPosition, distanceBetween, positionForNode, type Point } from "@/features/network/layout";
 import {
+  deriveFlagSpriteCapFromLodBudget,
   FLAG_MAX_SPRITES,
   FLAG_PRESSURE_BUILD_MS,
   FLAG_PRESSURE_REFRESH_MS,
@@ -338,6 +339,7 @@ export function NetworkView({
   const flagDrawMsRef = useRef(0);
   const showFlagsRef = useRef(showFlags);
   const flagAssetsRef = useRef<FlagAssetsPayload | null>(flagAssetsPayload);
+  const spriteCapRef = useRef(FLAG_MAX_SPRITES);
   const visibleNodeIdsRef = useRef<Set<string>>(new Set());
   const warnedUnmappedTreatySignatureRef = useRef("");
   const [size, setSize] = useState({ width: 1000, height: 350 });
@@ -451,6 +453,11 @@ export function NetworkView({
           : Number(budgetPreset),
     [adaptiveBudget, budgetPreset]
   );
+  const spriteCap = useMemo(() => deriveFlagSpriteCapFromLodBudget(maxEdges), [maxEdges]);
+
+  useEffect(() => {
+    spriteCapRef.current = spriteCap;
+  }, [spriteCap]);
 
   const scheduleRendererRefresh = useCallback(() => {
     if (refreshFrameRef.current !== null) {
@@ -735,7 +742,7 @@ export function NetworkView({
       nodeIds,
       focusedAlliance,
       hovered?.allianceId ?? null,
-      FLAG_MAX_SPRITES,
+      spriteCap,
       {
         visibleNodeIds: visibleNodeIdsRef.current,
         importanceByNodeId: flagImportanceByNodeId
@@ -904,6 +911,7 @@ export function NetworkView({
     layoutRelaxToken,
     maxNodeRadius,
     maxEdges,
+    spriteCap,
     playhead,
     resolveAllianceFlagAtPlayhead,
     scoreSizeContrast,
@@ -1092,7 +1100,7 @@ export function NetworkView({
 
         visibleNodeIds.add(nodeId);
 
-        if (drawn >= FLAG_MAX_SPRITES || !sprite) {
+        if (drawn >= spriteCapRef.current || !sprite) {
           continue;
         }
 

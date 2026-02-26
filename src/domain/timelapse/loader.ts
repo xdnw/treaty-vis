@@ -19,7 +19,7 @@ import {
 import type { NetworkLayoutStrategy, NetworkLayoutStrategyConfig } from "@/domain/timelapse/networkLayout/NetworkLayoutTypes";
 import { buildTimelapseIndices, type TimelapseIndices } from "@/domain/timelapse/selectors";
 import type { QueryState } from "@/features/filters/filterStore";
-import { dataAssetPath } from "@/lib/assetPaths";
+import { dataAssetPath, normalizeDataAssetUrl } from "@/lib/assetPaths";
 import type {
   LoaderWorkerRequest,
   LoaderWorkerResponse,
@@ -251,6 +251,28 @@ async function fetchMsgpack<T>(url: string): Promise<T> {
   }
   const body = await response.arrayBuffer();
   return decode(new Uint8Array(body)) as T;
+}
+
+function normalizeFlagAssetsPayload(flagAssetsPayload: FlagAssetsPayload): FlagAssetsPayload {
+  return {
+    ...flagAssetsPayload,
+    atlas: {
+      ...flagAssetsPayload.atlas,
+      webp: normalizeDataAssetUrl(flagAssetsPayload.atlas.webp, "flag_atlas.webp"),
+      png: normalizeDataAssetUrl(flagAssetsPayload.atlas.png, "flag_atlas.png")
+    }
+  };
+}
+
+function normalizeCachedBundle(bundle: TimelapseDataBundle): TimelapseDataBundle {
+  if (!bundle.flagAssetsPayload) {
+    return bundle;
+  }
+
+  return {
+    ...bundle,
+    flagAssetsPayload: normalizeFlagAssetsPayload(bundle.flagAssetsPayload)
+  };
 }
 
 function createWorker(): Worker {
@@ -590,7 +612,7 @@ function parseOptionalFlagArtifacts(
   }
 
   const parsedFlagAssets = flagAssetsRaw ? flagAssetsPayloadSchema.safeParse(flagAssetsRaw) : null;
-  const flagAssetsPayload = parsedFlagAssets?.success ? parsedFlagAssets.data : null;
+  const flagAssetsPayload = parsedFlagAssets?.success ? normalizeFlagAssetsPayload(parsedFlagAssets.data) : null;
   if (flagAssetsRaw && parsedFlagAssets && !parsedFlagAssets.success) {
     console.error("[timelapse] Invalid optional flag assets dataset", parsedFlagAssets.error.message);
   }
@@ -705,7 +727,7 @@ async function readCachedBundle(
         resolve(null);
         return;
       }
-      resolve(value?.bundle ?? null);
+      resolve(value?.bundle ? normalizeCachedBundle(value.bundle) : null);
     };
     request.onerror = () => resolve(null);
   });

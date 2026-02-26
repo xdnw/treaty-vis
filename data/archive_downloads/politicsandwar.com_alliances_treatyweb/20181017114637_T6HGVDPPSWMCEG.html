@@ -1,0 +1,288 @@
+
+<!DOCTYPE html>
+<!--[if lt IE 7]>      <html class="no-js lt-ie9 lt-ie8 lt-ie7"> <![endif]-->
+<!--[if IE 7]>         <html class="no-js lt-ie9 lt-ie8"> <![endif]-->
+<!--[if IE 8]>         <html class="no-js lt-ie9"> <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]-->
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Alliance Treaty Web - Politics and War</title>
+        <meta name="description" content="Visualized alliance treaty web for the popular online game, Politics and War">
+        <meta name="keywords" content="treaty web, alliances, alliance treaty web, politics war treaty web, Political game, Browser game, Country game, Create a country, Create a nation, Nation building game, Resource game, Free, Web game" />
+        <meta name="Copyright" content="Copyright © 2013-2018 Red Road Entertainment LLC">
+        <meta http-equiv="reply-to" content="politicsandwaronline@gmail.com">
+        <meta name="robots" content="index, follow">
+        <meta name="author" content="Red Road Entertainment">
+        <meta property="og:title" content="Alliance Treaty Web - Politics and War">
+        <meta property="og:image" content="https://politicsandwar.com/img/pages/treaty-web.png">
+        <meta property="og:description" content="Visualized alliance treaty web for the popular online game, Politics and War">
+        
+        <!--Notification Script-->
+        <link rel="manifest" href="/manifest.json" />
+        <script src="https://cdn.onesignal.com/sdks/OneSignalSDK.js" async=""></script>
+        <script>
+            var OneSignal = window.OneSignal || [];
+            OneSignal.push(function() {
+              OneSignal.init({
+                appId: "04c3222f-637b-4153-b0e6-fd9bef0d52b9",
+              });
+            });
+        </script>
+        
+        <link rel="stylesheet" href="https://politicsandwar.com/css/jquery-jvectormap-1.2.2.css">
+        <link rel="stylesheet" href="https://politicsandwar.com/css/jquery-jvectormap-1.2.2.css">
+        <!-- Bootstrap -->
+        <link href="https://politicsandwar.com/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.10.1/jquery.min.js"></script>
+
+        <script src="https://politicsandwar.com/js/vendor/modernizr-2.6.2-respond-1.1.0.min.js"></script>
+        <script src="https://politicsandwar.com/js/jquery-jvectormap-1.2.2.min.js"></script>
+        <script src="https://politicsandwar.com/js/moment.js"></script>
+        <script src="https://politicsandwar.com/js/bootstrap_tooltip.min.js"></script>
+        <script src="https://politicsandwar.com/js/bootstrap_popover.min.js"></script>
+        
+        <link rel="stylesheet" href="https://politicsandwar.com/css/masterbootstrap.css">	
+        <link href="https://fonts.googleapis.com/css?family=Merriweather" rel="stylesheet">
+        <link rel="stylesheet" href="https://politicsandwar.com/includes/font-awesome/css/font-awesome.min.css">
+                
+                
+        <!-- Facebook Pixel Code -->
+        <script>
+          !function(f,b,e,v,n,t,s)
+          {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+          n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+          if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+          n.queue=[];t=b.createElement(e);t.async=!0;
+          t.src=v;s=b.getElementsByTagName(e)[0];
+          s.parentNode.insertBefore(t,s)}(window, document,'script',
+          'https://connect.facebook.net/en_US/fbevents.js');
+          fbq('init', '1994729317430854');
+          fbq('track', 'PageView');
+        </script>
+        <noscript><img height="1" width="1" style="display:none"
+          src="https://www.facebook.com/tr?id=1994729317430854&ev=PageView&noscript=1"
+        /></noscript>
+        <!-- End Facebook Pixel Code -->
+     
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        <script async src="//pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+    </head>
+    <body>
+        <div id="bg-map">
+        </div>
+        
+		
+        <!--[if lt IE 7]>
+            <p class="chromeframe">You are using an <strong>outdated</strong> browser. Please <a href="http://browsehappy.com/">upgrade your browser</a> or <a href="http://www.google.com/chromeframe/?redirect=true">activate Google Chrome Frame</a> to improve your experience.</p>
+        <![endif]-->
+		<div class="container">
+			<div id="logo">
+				<div class="row">
+					<div class="col-xs-2 col-sm-3 border-menu">
+						<button id="burgermenutoggle"><img src="https://politicsandwar.com/img/navicon.png" alt="Navicon" class="img-responsive"></button>
+					</div>
+					<div class="col-xs-10 col-sm-9 col-md-12">
+						<a href="https://politicsandwar.com/index.php" data-toggle="tooltip" title="Politics & War - Create and Manage Your Very Own Nation">
+															<img src="https://politicsandwar.com/img/logo.png" class="img-responsive" data-toggle="tooltip" title="Politics & War">
+													</a>
+					</div>
+				</div>
+			</div>
+			<!-- End Logo -->
+			
+			<div class="row">
+			<div id="leftcolumn" class="col-md-2">
+						<ul>
+				<span style="font-weight:bold; font-size: 18px;">Play</span>
+					<a href="https://politicsandwar.com/"><li>Home</li></a>
+					<a href="https://politicsandwar.com/register/"><li>Start Playing</li></a>
+					<a href="https://politicsandwar.com/login/"><li>Login</li></a>
+			</ul>
+			<ul>
+				<span style="font-weight:bold; font-size: 18px;">World</span>
+					<a href="https://politicsandwar.com/nations/"><li>Nations</li></a>
+					<a href="https://politicsandwar.com/alliances/"><li>Alliances</li></a>
+                                        <a href="https://politicsandwar.com/leaderboards/"><li>Leaderboards</li></a>
+                                        <a href="https://politicsandwar.com/alliances/treatyweb/"><li>Treaty Web</li></a>
+					<a href="https://politicsandwar.com/world/conflicts/"><li>Conflicts</li></a>
+					<a href="https://politicsandwar.com/world/bounties/"><li>Bounties</li></a>
+					<a href="https://politicsandwar.com/world/embargoes/"><li>Embargoes</li></a>
+					<a href="https://politicsandwar.com/world/radiation/"><li>Radiation</li></a>
+					<a href="https://politicsandwar.com/world/advertisements/"><li>Advertisements</li></a>
+					<a href="https://politicsandwar.com/worldmap/"><li>World Map</li></a>
+			</ul>
+			<ul>
+				<span style="font-weight:bold; font-size: 18px;">Community</span>
+					<a href="https://politicsandwar.com/forums/" target="_blank"><li>Forums</li></a>
+					<a href="https://discord.gg/pw" target="_blank"><li>Discord</li></a>
+					<!--<a href="https://politicsandwar.com/irc/"><li>IRC Channel</li></a>-->
+					<a href="https://politicsandwar.com/pwpedia/"><li>P&Wpedia</li></a>
+					<a href="http://politicsandwar.wikia.com/" target="_blank"><li>Wiki</li></a>
+					<a href="http://reddit.com/r/politicsandwar" target="_blank"><li>Reddit</li></a>
+			</ul>
+			<ul>
+			<span style="font-weight:bold; font-size: 18px;">Server Time</span>
+			<br />October 17 11:46 am
+						</div>
+			<div id="rightcolumn" class="col-md-10">
+			
+<script type="text/javascript" src="https://politicsandwar.com/js/vis.min2.js"></script>
+<script>
+    var linkElement = document.createElement("link");
+    linkElement.rel = "stylesheet";
+    linkElement.href = "https://politicsandwar.com/css/vis.min.britannia.css"; //Replace here
+
+    document.head.appendChild(linkElement);
+</script>
+
+<div class="columnheader">Alliance Treaty Web</div>
+
+<p class="text-justify">
+    The Alliance Treaty Web is a visualization of the Top 50 Alliances (above 30,000 Score) 
+    and their in-game formal obligations to each other. Below the web is a list of treaty types and brief descriptions. The Treaty Web was originally 
+    created by the player Phiney (and kept updated by various players), but is now operated automatically through in-game mechanics. 
+</p>
+
+<div id="treatyWeb" style="width:100%; height:600px;" class="thumbnail"></div>
+
+<script type="text/javascript">
+    // create an array with nodes
+    var nodes = new vis.DataSet([
+        {id:1584, label: 'The Knights Radiant', image: 'https://politicsandwar.com/uploads/69201218da93876aafd1dfde51b2e08abcbf3d61116.jpg', title: 'The Knights Radiant', size: '44.68', url:'/alliance/id=1584'},{id:3427, label: 'The Commonwealth', image: 'http://i.imgur.com/uNmLmbd.png', title: 'The Commonwealth', size: '38.67', url:'/alliance/id=3427'},{id:877, label: 'Black Knights', image: 'http://i.imgur.com/Qtvc2Ly.png', title: 'Black Knights', size: '36.73', url:'/alliance/id=877'},{id:2082, label: 'New Pacific Order', image: 'http://i.imgur.com/H86eYYw.png', title: 'New Pacific Order', size: '36.61', url:'/alliance/id=2082'},{id:1896, label: 'Pantheon', image: 'http://i.imgur.com/xZWDu6k.png', title: 'Pantheon', size: '35.34', url:'/alliance/id=1896'},{id:619, label: 'Guardian', image: 'http://imgur.com/YjlGKXG.png', title: 'Guardian', size: '29.54', url:'/alliance/id=619'},{id:790, label: 'Rose', image: 'http://i.imgur.com/Pt8GgzX.jpg', title: 'Rose', size: '28.6', url:'/alliance/id=790'},{id:831, label: 'The Syndicate', image: 'http://i.imgur.com/K01a15M.jpg', title: 'The Syndicate', size: '28.22', url:'/alliance/id=831'},{id:1023, label: 'The Fighting Pacifists', image: 'http://i.imgur.com/T4iavn3.png', title: 'The Fighting Pacifists', size: '27.98', url:'/alliance/id=1023'},{id:4149, label: 'Church of Spaceology', image: 'https://politicsandwar.com/uploads/319e04377bdb89d51581adcfe8401563cd82f61a955.jpg', title: 'Church of Spaceology', size: '26.92', url:'/alliance/id=4149'},{id:3339, label: 'Grumpy Old Bastards', image: 'http://i.imgur.com/ZfTEsQp.jpg', title: 'Grumpy Old Bastards', size: '26.79', url:'/alliance/id=3339'},{id:4440, label: 'Bad Company', image: 'https://politicsandwar.com/uploads/2fcd3cc2839f14fb46a2cb98c8adb123dddd281c690.png', title: 'Bad Company', size: '22.37', url:'/alliance/id=4440'},{id:4124, label: 'Knights Templar', image: 'https://politicsandwar.com/uploads/5ed63443e71713aae7819af4dd721beda896b1dd692.png', title: 'Knights Templar', size: '21.69', url:'/alliance/id=4124'},{id:4778, label: 'Terminus Est', image: 'http://i.imgur.com/rrIaAsm.jpg', title: 'Terminus Est', size: '21.14', url:'/alliance/id=4778'},{id:615, label: 'Seven Kingdoms', image: 'http://i.imgur.com/5KPRcSf.jpg', title: 'Seven Kingdoms', size: '20.92', url:'/alliance/id=615'},{id:866, label: 'Guardians of the Galaxy', image: 'http://i.imgur.com/LdPJva1.png', title: 'Guardians of the Galaxy', size: '19.75', url:'/alliance/id=866'},{id:2358, label: 'Polaris', image: 'http://i.imgur.com/J18OLaK.png', title: 'Polaris', size: '18.81', url:'/alliance/id=2358'},{id:1246, label: 'Fark', image: 'https://vignette1.wikia.nocookie.net/cybernations/images/d/d1/FARK_Flag.svg', title: 'Fark', size: '18.8', url:'/alliance/id=1246'},{id:623, label: 'Acadia', image: 'https://politicsandwar.com/uploads/73bcccd62551f9f2aeffd5b8188ef544c806e8b2307.jpg', title: 'Acadia', size: '18.66', url:'/alliance/id=623'},{id:4221, label: 'Dark Brotherhood', image: 'http://i.imgur.com/bVIy4Aj.png', title: 'Dark Brotherhood', size: '18.65', url:'/alliance/id=4221'},{id:1742, label: 'Empyrea', image: 'https://cdn.discordapp.com/attachments/275780236480872448/462020696038703126/qFKTj2S.png', title: 'Empyrea', size: '17.9', url:'/alliance/id=1742'},{id:4571, label: 'Tesla', image: 'http://i.imgur.com/rGFspOq.png', title: 'Tesla', size: '17.73', url:'/alliance/id=4571'},{id:4567, label: 'The Golden Horde', image: 'http://i.imgur.com/H8WbaHZ.png', title: 'The Golden Horde', size: '17.59', url:'/alliance/id=4567'},{id:3683, label: 'House Stark', image: 'http://i.imgur.com/cDFzXaW.jpg', title: 'House Stark', size: '17.28', url:'/alliance/id=3683'},{id:4729, label: 'Church Of Atom', image: 'https://cdn.discordapp.com/attachments/416496018348048394/436026489184452609/20180417_215118.jpg', title: 'Church Of Atom', size: '17.02', url:'/alliance/id=4729'},{id:4829, label: 'The Enterprise', image: 'https://cdn.discordapp.com/attachments/442900043683332096/443503770748452864/es_flag.jpg', title: 'The Enterprise', size: '16.65', url:'/alliance/id=4829'},{id:622, label: 'United Purple Nations', image: 'https://politicsandwar.com/uploads/0bb20ed653e06676a8e340cb6d2cc2f1cd4b2fea596.png', title: 'United Purple Nations', size: '16.62', url:'/alliance/id=622'},{id:4352, label: 'The Revolutionary Front', image: 'https://politicsandwar.com/uploads/b37a516b3a641da6bf674d5882b4800fb28cae99254.jpg', title: 'The Revolutionary Front', size: '16.31', url:'/alliance/id=4352'},{id:1210, label: 'World Task Force', image: 'http://i.imgur.com/RuSwJ83.png', title: 'World Task Force', size: '15.87', url:'/alliance/id=1210'},{id:3940, label: 'The United Empire of ZahAharon', image: 'http://i.imgur.com/7pxFlQB.png', title: 'The United Empire of ZahAharon', size: '15.54', url:'/alliance/id=3940'},{id:2510, label: 'Order of the White Rose', image: 'http://i.imgur.com/A5Fh27v.png', title: 'Order of the White Rose', size: '15.46', url:'/alliance/id=2510'},{id:1634, label: 'Nuclear Knights', image: 'http://imgur.com/EtvD3wN.png', title: 'Nuclear Knights', size: '15.28', url:'/alliance/id=1634'},{id:4901, label: 'Afrika Korps', image: 'http://i.imgur.com/MXFA1zg.png', title: 'Afrika Korps', size: '15.19', url:'/alliance/id=4901'},{id:4597, label: 'Animation Domination', image: 'https://politicsandwar.com/uploads/90774340071a7c62b0bc67927155bd81fc874eb2780.jpg', title: 'Animation Domination', size: '15.09', url:'/alliance/id=4597'},{id:4894, label: 'GodFury', image: 'https://politicsandwar.com/uploads/5ea1646cad267ddbd0e68a0db5d97cc5606f367e418.jpg', title: 'GodFury', size: '14.89', url:'/alliance/id=4894'},{id:2540, label: 'Ashenguard', image: 'https://politicsandwar.com/uploads/c3e0821b5a95c11cf0a084600efd3af3f4946cea178.jpg', title: 'Ashenguard', size: '14.82', url:'/alliance/id=2540'},{id:4141, label: 'Orange Defense Network', image: 'http://i.imgur.com/TbFCc9C.png', title: 'Orange Defense Network', size: '14.79', url:'/alliance/id=4141'},{id:4169, label: 'Yakuza', image: 'https://politicsandwar.com/uploads/a2608a8338245648da28911833cd8d15054145fb803.jpg', title: 'Yakuza', size: '14.77', url:'/alliance/id=4169'},{id:4937, label: 'Camelot', image: 'https://politicsandwar.com/uploads/1be7921b74f6ff04354d174c3a15953833625f9f120.png', title: 'Camelot', size: '14.75', url:'/alliance/id=4937'},{id:1142, label: 'The Coalition', image: 'http://i.imgur.com/6uN0vRj.png', title: 'The Coalition', size: '14.67', url:'/alliance/id=1142'},{id:5012, label: 'RnR', image: 'https://politicsandwar.com/uploads/e3ae5cef2fa9da32ca384086bd8f543d5a0518f2186.jpg', title: 'RnR', size: '14.41', url:'/alliance/id=5012'},{id:4214, label: 'Typhon', image: 'https://politicsandwar.com/uploads/8a397e080b56773ebe68be3f986dbf59f0b994b7441.jpg', title: 'Typhon', size: '14.12', url:'/alliance/id=4214'},{id:4884, label: 'United Hoods', image: 'https://politicsandwar.com/uploads/7b0b4af04c1598596d695f3c100194f72f1d518a660.jpg', title: 'United Hoods', size: '13.87', url:'/alliance/id=4884'},{id:4323, label: 'Horsemen', image: 'https://politicsandwar.com/uploads/f472c25010776d8e7cca4987e529f3738b1c4ae9822.jpg', title: 'Horsemen', size: '13.83', url:'/alliance/id=4323'},{id:913, label: 'Arrgh', image: 'http://i.imgur.com/rIjDl1V.png', title: 'Arrgh', size: '13.75', url:'/alliance/id=913'},{id:4110, label: 'Cobra Kai Dojo', image: 'http://i.imgur.com/rcatuBk.png', title: 'Cobra Kai Dojo', size: '13.62', url:'/alliance/id=4110'},{id:5013, label: 'Brotherhood of the Clouds', image: 'https://politicsandwar.com/uploads/ac1fcf078eaa0911bdf309cb6841b51a77040643795.png', title: 'Brotherhood of the Clouds', size: '13.56', url:'/alliance/id=5013'},{id:4900, label: 'La Mafia', image: 'https://politicsandwar.com/uploads/ba616ad1277ecd6b296ef76e692f95f8959fbdb5164.jpg', title: 'La Mafia', size: '13.36', url:'/alliance/id=4900'},{id:4765, label: 'The Island', image: 'https://politicsandwar.com/uploads/12cadb3228d1153e29bac395308224c90418498c558.gif', title: 'The Island', size: '13.34', url:'/alliance/id=4765'},{id:4638, label: 'The Federation', image: 'https://politicsandwar.com/uploads/bb7d4269a0b1df30032995f5d901db110a16bf7381.png', title: 'The Federation', size: '13.18', url:'/alliance/id=4638'}    ]);
+
+    // create an array with edges
+    var edges = new vis.DataSet([
+        {'from':4440, 'to':1023, 'color':'#00aeef', 'length':100, 'title':'ODP'},{'from':4567, 'to':4124, 'color':'#ced518', 'length':100, 'title':'MDP'},{'from':831, 'to':4829, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':3683, 'to':4110, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':3940, 'to':2510, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':4352, 'to':3427, 'color':'#ced518', 'length':100, 'title':'MDP'},{'from':4352, 'to':1246, 'color':'#ced518', 'length':100, 'title':'MDP'},{'from':4221, 'to':1896, 'color':'#ced518', 'length':100, 'title':'MDP'},{'from':831, 'to':4901, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':3427, 'to':1584, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':4352, 'to':619, 'color':'#00aeef', 'length':100, 'title':'ODP'},{'from':2540, 'to':1023, 'color':'#00aeef', 'length':100, 'title':'ODP'},{'from':866, 'to':2082, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':866, 'to':877, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':866, 'to':623, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':877, 'to':2082, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':877, 'to':2510, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':877, 'to':623, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':1023, 'to':619, 'color':'#ced518', 'length':100, 'title':'MDP'},{'from':4597, 'to':4884, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':4323, 'to':4221, 'color':'#00aeef', 'length':100, 'title':'ODP'},{'from':2082, 'to':4323, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':2358, 'to':4729, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':1023, 'to':790, 'color':'#00aeef', 'length':100, 'title':'ODP'},{'from':4141, 'to':2082, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':3683, 'to':831, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':1210, 'to':1246, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':4323, 'to':1210, 'color':'#00aeef', 'length':100, 'title':'ODP'},{'from':1023, 'to':4884, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':3683, 'to':619, 'color':'#ced518', 'length':100, 'title':'MDP'},{'from':2358, 'to':3940, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':2358, 'to':2082, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':2358, 'to':623, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':2358, 'to':2510, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':1634, 'to':4729, 'color':'#ced518', 'length':100, 'title':'MDP'},{'from':831, 'to':4638, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':4765, 'to':4440, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':4440, 'to':2510, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':4440, 'to':3940, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':831, 'to':4729, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':2358, 'to':4440, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':831, 'to':4221, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':877, 'to':4937, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':877, 'to':4169, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':4567, 'to':1742, 'color':'#ced518', 'length':100, 'title':'MDP'},{'from':1896, 'to':831, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':3683, 'to':5012, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':2540, 'to':790, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':831, 'to':4884, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':790, 'to':4894, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':2358, 'to':4221, 'color':'#00aeef', 'length':100, 'title':'ODP'},{'from':877, 'to':1634, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':4894, 'to':2540, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':790, 'to':831, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':3940, 'to':877, 'color':'#ced518', 'length':100, 'title':'MDP'},{'from':866, 'to':4937, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':623, 'to':622, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':1896, 'to':4638, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':4900, 'to':831, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':1742, 'to':4124, 'color':'#ced518', 'length':100, 'title':'MDP'},{'from':4765, 'to':4597, 'color':'#ced518', 'length':100, 'title':'MDP'},{'from':4352, 'to':1210, 'color':'#00aeef', 'length':100, 'title':'ODP'},{'from':1896, 'to':4894, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':4638, 'to':4884, 'color':'#0d2572', 'length':100, 'title':'ODoAP'},{'from':790, 'to':3683, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':790, 'to':5013, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':1896, 'to':4214, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':4440, 'to':4597, 'color':'#0d2572', 'length':100, 'title':'ODoAP'},{'from':1584, 'to':4571, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':4221, 'to':4729, 'color':'#65c765', 'length':100, 'title':'Protectorate','arrows':'to'},{'from':5012, 'to':4901, 'color':'#0d2572', 'length':100, 'title':'ODoAP'},{'from':3940, 'to':4597, 'color':'#c10007', 'length':100, 'title':'MDoAP'},{'from':619, 'to':3427, 'color':'#c10007', 'length':100, 'title':'MDoAP'}    ]);
+
+    // create a network
+    var container = document.getElementById('treatyWeb');
+    var data = {
+        nodes: nodes,
+        edges: edges
+    };
+    var options = {
+        height: '100%',
+        width: '100%',
+        nodes: {
+                shape: "image"
+        },
+        edges: {
+                width: 2
+        },
+        physics: {
+                solver: "forceAtlas2Based"
+        }
+    };
+    var network = new vis.Network(container, data, options);
+    
+    network.on("selectNode", function (params) {
+        if (params.nodes.length === 1) {
+            var node = nodes.get(params.nodes[0]);
+            window.open(node.url, '_blank');
+        }
+    });
+</script>
+
+<style>
+    .colorBlock {
+        display: inline-block;
+        margin: 3px 3px 0 3px;
+        height: 12px;
+        width: 12px;
+    }
+</style>
+
+<p class="smallText italic text-justify">
+    Only the Top 50 Alliances with at least 30,000 Score will be shown in the treaty web.
+</p>
+
+<p id="treatyInfo" class="center bold">
+    <span class="colorBlock" style="background:#ced518;"></span> MDP 
+    <span class="colorBlock" style="background:#c10007;"></span> MDoAP 
+    <span class="colorBlock" style="background:#00aeef;"></span> ODP
+    <span class="colorBlock" style="background:#0d2572;"></span> ODoAP  
+    <span class="colorBlock" style="background:#65c765;"></span> Protectorate  
+    <span class="colorBlock" style="background:#ffb6c1;"></span> NAP/PIAT  
+</p>
+<p class="smallText center">
+    NAP/PIAT treaties are hidden by default to reduce clutter. <a href="/alliances/treatyweb/all">Click here to view the entire treaty web.</a>
+</p>
+
+<hr />
+<p>
+    <strong>MDP:</strong> Mutual Defense Pact. Both parties agree to come to the other's defense if attacked
+</p>
+<p>
+    <strong>MDoAP:</strong> Mutual Defense and Optional Agression Pact. Both parties agree to come to the other's defense if attacked, and have the option to help in the other party's offensive endeavors
+</p>
+<p>
+    <strong>ODP:</strong> Optional Defense Pact: Both parties agree to optionally helping the other if they are attacked
+</p>
+<p>
+    <strong>ODoAP:</strong> Optional Defense and Optional Aggression Pact: Both parties agree to help the other if they are attacked, and have the option to help in the other party's offensive endeavors
+</p>
+<p>
+    <strong>Protectorate:</strong> A one-way MDP wherein one alliance agrees to protect another. The protected alliance is under no obligation to defend the protector.
+</p>
+<p>
+    <strong>NAP:</strong> Non-aggression pact. Both parties agree not to attack each other.
+</p>
+<p>
+    <strong>PIAT:</strong> Peace, Intelligence and Aid Treaty. Both parties agree to help each other and pledge non-aggression, but are not obligated to defend each other.
+</p>
+
+<p>
+    <strong>*<u>Note</u>:</strong> Treaties are not enforced by the game, except non-aggression. Nations in treatied alliances will not be able to declare wars on each other. 
+</p>			</div>
+			
+						
+			</div>
+                        
+                        
+			
+			<div id="footer">
+                            <div class="row" style="margin-top:15px;">
+                                <div class="col-xs-12 col-md-5 col-md-offset-2">
+                                    <p>&copy; <a href="http://redroadentertainment.com/" target="_blank">Red Road Entertainment LLC</a> 2014-2018</p>
+                                    <p><a href="https://politicsandwar.com/terms/">Terms and Conditions</a></p>
+                                    <p><a href="https://politicsandwar.com/rules/">Game Rules</a></p>
+                                    <p><a href="https://politicsandwar.com/privacy/">Privacy Policy</a></p>
+                                </div>
+                                <div class="hidden-xs hidden-sm col-md-5">
+                                    <p><a href="https://discord.gg/pw" target="_blank">Discord</a></p>
+                                    <p><a href="https://forum.politicsandwar.com/" target="_blank">Forums</a></p>
+                                    <p><a href="http://politicsandwar.wikia.com/" target="_blank">Wiki</a></p>
+                                    <p><a href="https://politicsandwar.com/donate/" target="_blank">Donate</a></p>
+                                </div>
+                            </div>
+			</div><!--End Footer-->
+			
+		</div>
+		
+		<script src="https://politicsandwar.com/js/main.js"></script>
+                
+                <script>
+                    $(document).ready(function(){
+                        $('[data-toggle="tooltip"]').tooltip(); 
+                    });
+                </script>
+
+		<script>
+			(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+				(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+				m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+			})(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+			ga('create', 'UA-44610512-1', 'politicsandwar.com');
+			ga('send', 'pageview');
+
+			$("#burgermenutoggle").click(function() {
+				$("#leftcolumn").slideToggle();
+				$("#rightcolumn").slideToggle();
+			});
+		</script>
+
+		<script>window.onload = function() { history.replaceState("", "", window.location.href); } </script>	</body>
+</html>

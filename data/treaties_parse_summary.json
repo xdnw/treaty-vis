@@ -1,0 +1,91 @@
+{
+  "messages_processed": 20560,
+  "records_written": 19482,
+  "cancelled_records": 4541,
+  "skipped_total": 3165,
+  "flags_total": 18893,
+  "skipped_categories": {
+    "non_treaty_from_to_without_action_words": {
+      "count": 6,
+      "first_occurrence_timestamp": "2025-01-01T05:08:59.800000+00:00",
+      "example_excerpt": "rank #337** Time remaining: <t:1735833600:R> (18 turns) From: [MoOR](<https://politicsandwar.com/alliance/id=12286>) - #337 (0 nations) To: [Maghreb Union](<https://politicsandwar.com/alliance/id=12848>) - #351 (0 nations)",
+      "example_message_json": {
+        "id": "1323880634594103399",
+        "channel_id": "880473974436401182",
+        "timestamp": "2025-01-01T05:08:59.800000+00:00",
+        "edited_timestamp": null,
+        "content": "rank #337**\nTime remaining: <t:1735833600:R> (18 turns)\nFrom: [MoOR](<https://politicsandwar.com/alliance/id=12286>) - #337 (0 nations)\nTo: [Maghreb Union](<https://politicsandwar.com/alliance/id=12848>) - #351 (0 nations)",
+        "author": {
+          "id": "672237266940198960",
+          "username": "Locutus",
+          "discriminator": "7602",
+          "bot": true
+        },
+        "embeds": []
+      },
+      "first_context": {
+        "kind": "non_treaty"
+      }
+    },
+    "non_treaty_link_preview_embed": {
+      "count": 3157,
+      "first_occurrence_timestamp": "2023-09-04T21:21:56.543000+00:00",
+      "example_excerpt": "Created: THE Seven Kingdoms https://politicsandwar.com/alliance/id=11928",
+      "example_message_json": {
+        "id": "1148367369585053696",
+        "channel_id": "880473974436401182",
+        "timestamp": "2023-09-04T21:21:56.543000+00:00",
+        "edited_timestamp": null,
+        "content": "",
+        "author": {
+          "id": "672237266940198960",
+          "username": "Locutus",
+          "discriminator": "7602",
+          "bot": true
+        },
+        "embeds": [
+          {
+            "title": "Created: THE Seven Kingdoms",
+            "description": "https://politicsandwar.com/alliance/id=11928",
+            "url": null,
+            "type": "rich"
+          }
+        ]
+      },
+      "first_context": {
+        "kind": "non_treaty"
+      }
+    },
+    "non_treaty_content_only_non_treaty_plain": {
+      "count": 2,
+      "first_occurrence_timestamp": "2023-08-29T05:10:53.270000+00:00",
+      "example_excerpt": "Fro m: [Damn I love Frogs](<https://politicsandwar.com/alliance/id=10198>) To: [The Hand of Fate](<https://politicsandwar.com/alliance/id=9000>)",
+      "example_message_json": {
+        "id": "1145948668512444496",
+        "channel_id": "880473974436401182",
+        "timestamp": "2023-08-29T05:10:53.270000+00:00",
+        "edited_timestamp": null,
+        "content": "Fro\nm: [Damn I love Frogs](<https://politicsandwar.com/alliance/id=10198>)\nTo: [The Hand of Fate](<https://politicsandwar.com/alliance/id=9000>)",
+        "author": {
+          "id": "672237266940198960",
+          "username": "Locutus",
+          "discriminator": "7602",
+          "bot": true
+        },
+        "embeds": []
+      },
+      "first_context": {
+        "kind": "non_treaty"
+      }
+    }
+  },
+  "malformed_categories": {},
+  "unknowns_full_list": [],
+  "flags_primary_total": 32,
+  "flags_aux_total": 18861,
+  "flags_aux_types": [
+    "duplicate_treaty_event",
+    "missing_time_remaining_defaulted",
+    "skipped_non_treaty"
+  ]
+}

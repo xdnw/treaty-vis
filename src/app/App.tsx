@@ -286,7 +286,7 @@ export function App() {
           <h1 className="text-2xl">Treaty Timelapse</h1>
           <p className="mt-2 text-sm text-slate-700">{error ?? "Failed to load dataset."}</p>
           <p className="mt-2 text-xs text-slate-500">
-            Run <code>npm run data:sync</code> in <code>web/</code> after generating reconciled output files.
+            Run <code>npm run data:sync</code> after generating reconciled output files.
           </p>
         </section>
       </main>

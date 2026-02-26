@@ -213,7 +213,7 @@ export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankDa
             Include noise-tagged events
           </label>
           <label className="flex items-center gap-2">
-            Evidence filter
+            Confidence filter
             <select
               className="rounded border border-slate-300 px-1 py-0.5"
               value={query.filters.evidenceMode}
@@ -221,7 +221,7 @@ export function FilterBar({ indices, timelineTicks, hasScoreData, hasScoreRankDa
                 actions.setEvidenceMode(event.target.value as "all" | "one-confirmed" | "both-confirmed")
               }
             >
-              <option value="all">All evidence levels</option>
+              <option value="all">All confidence levels</option>
               <option value="one-confirmed">At least one side confirmed</option>
               <option value="both-confirmed">Both sides confirmed</option>
             </select>
